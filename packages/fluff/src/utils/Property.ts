@@ -252,13 +252,13 @@ export class Property<T>
     {
         if (this.value === undefined) return;
         this.onChange.emit(this.value);
-        if (direction == Direction.Outbound)
+        if (direction === Direction.Outbound)
         {
             this.onOutboundChange.emit(this.value);
         }
-        if (direction == Direction.Inbound)
+        if (direction === Direction.Inbound)
         {
-            this.onOutboundChange.emit(this.value);
+            this.onInboundChange.emit(this.value);
         }
     }
 
