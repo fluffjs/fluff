@@ -12,6 +12,8 @@ interface ElementWithStyle extends Element
     style: CSSStyleDeclaration;
 }
 
+const BINDING_TYPES = ['property', 'event', 'two-way', 'class', 'style', 'ref'] as const;
+
 export interface BindingInfo
 {
     n: string;
@@ -24,18 +26,55 @@ export interface BindingInfo
     p?: { n: string; a: number[] }[];
 }
 
+/**
+ * Compact Binding Format (Decoder)
+ *
+ * Bindings are received as tuples to minimize bundle size. All strings are
+ * stored in a global string table (FluffBase.__s) and referenced by index.
+ *
+ * Format: [nameIdx, bindType, deps, id, extras?]
+ *
+ * - nameIdx: Index into __s for the binding name (e.g., "value", "click")
+ * - bindType: Numeric binding type (0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref)
+ * - deps: Array of interned dependency chains, or null. Each dep is either:
+ *         - A single index (for simple property like "foo")
+ *         - An array of indices (for nested property chain like ["device", "name"])
+ * - id: Expression ID (for property/two-way/class/style) or Handler ID (for event), or null
+ * - extras: Optional object with additional binding metadata:
+ *           - t: Target property name for two-way bindings
+ *           - s: Subscribe source name
+ *           - p: Pipes array of [pipeNameIdx, argExprIds[]]
+ *
+ * The string table is set via FluffBase.__setExpressionTable(exprs, handlers, strings).
+ * __decodeBinding() converts CompactBinding back to BindingInfo for runtime use.
+ */
+type CompactDep = number | number[];
+
+export type CompactBinding = [
+    number,
+    number,
+    CompactDep[] | null,
+    number | null,
+    { t?: string; s?: string; p?: [number, number[]][] }?
+];
+
 export abstract class FluffBase extends HTMLElement
 {
     public static __e: ExpressionFn[] = [];
     public static __h: HandlerFn[] = [];
-    public static __bindings: Record<string, BindingInfo[]> = {};
+    public static __s: string[] = [];
+    public static __bindings: Record<string, (CompactBinding | BindingInfo)[]> = {};
     private static __expressionsReady = false;
     private static readonly __pendingInitCallbacks: (() => void)[] = [];
 
-    public static __setExpressionTable(expressions: ExpressionFn[], handlers: HandlerFn[]): void
+    public static __setExpressionTable(expressions: ExpressionFn[], handlers: HandlerFn[], strings?: string[]): void
     {
         FluffBase.__e = expressions;
         FluffBase.__h = handlers;
+        if (strings)
+        {
+            FluffBase.__s = strings;
+        }
         FluffBase.__expressionsReady = true;
 
         const pending = FluffBase.__pendingInitCallbacks.splice(0, FluffBase.__pendingInitCallbacks.length);
@@ -43,6 +82,62 @@ export abstract class FluffBase extends HTMLElement
         {
             callback();
         }
+    }
+
+    private static __decodeDep(dep: CompactDep): PropertyChain
+    {
+        if (Array.isArray(dep))
+        {
+            return dep.map(idx => FluffBase.__s[idx]);
+        }
+        return FluffBase.__s[dep];
+    }
+
+    private static __decodeBinding(compact: CompactBinding): BindingInfo
+    {
+        const [nameIdx, bType, deps, id, extras] = compact;
+        const n = FluffBase.__s[nameIdx];
+        const b = BINDING_TYPES[bType];
+
+        const result: BindingInfo = { n, b };
+
+        if (deps)
+        {
+            result.d = deps.map(d => FluffBase.__decodeDep(d));
+        }
+
+        if (b === 'event')
+        {
+            if (id !== null)
+            {
+                result.h = id;
+            }
+        }
+        else if (id !== null)
+        {
+            result.e = id;
+        }
+
+        if (extras)
+        {
+            if (extras.t)
+            {
+                result.t = extras.t;
+            }
+            if (extras.s)
+            {
+                result.s = extras.s;
+            }
+            if (extras.p)
+            {
+                result.p = extras.p.map(([pipeNameIdx, args]) => ({
+                    n: FluffBase.__s[pipeNameIdx],
+                    a: args
+                }));
+            }
+        }
+
+        return result;
     }
 
     public static __areExpressionsReady(): boolean
@@ -129,16 +224,28 @@ export abstract class FluffBase extends HTMLElement
             const bindings = Reflect.get(ctor, '__bindings') as unknown;
             if (this.__isBindingsMap(bindings))
             {
-                return bindings[lid];
+                const lidBindings = bindings[lid];
+                if (lidBindings)
+                {
+                    return lidBindings.map(b => FluffBase.__decodeBindingAny(b));
+                }
             }
         }
         return undefined;
     }
 
-    private __isBindingsMap(value: unknown): value is Record<string, BindingInfo[]>
+    private static __decodeBindingAny(binding: CompactBinding | BindingInfo): BindingInfo
+    {
+        if (Array.isArray(binding))
+        {
+            return FluffBase.__decodeBinding(binding);
+        }
+        return binding;
+    }
+
+    private __isBindingsMap(value: unknown): value is Record<string, (CompactBinding | BindingInfo)[]>
     {
         return !(!value || typeof value !== 'object');
-
     }
 
     protected __applyBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void

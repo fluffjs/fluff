@@ -33,6 +33,54 @@ const RESTRICTED_ELEMENT_PREFIX = 'x-fluff-el-';
 
 export type MarkerConfig = IfMarkerConfig | ForMarkerConfig | SwitchMarkerConfig | TextMarkerConfig | BreakMarkerConfig;
 
+const BIND_PROPERTY = 0;
+const BIND_EVENT = 1;
+const BIND_TWO_WAY = 2;
+const BIND_CLASS = 3;
+const BIND_STYLE = 4;
+const BIND_REF = 5;
+
+const BINDING_TYPE_MAP: Record<string, number> = {
+    'property': BIND_PROPERTY,
+    'event': BIND_EVENT,
+    'two-way': BIND_TWO_WAY,
+    'class': BIND_CLASS,
+    'style': BIND_STYLE,
+    'ref': BIND_REF
+};
+
+/**
+ * Compact Binding Format (Encoder)
+ *
+ * Bindings are serialized as tuples to minimize bundle size. All strings are
+ * interned into a global string table and referenced by index.
+ *
+ * Format: [nameIdx, bindType, deps, id, extras?]
+ *
+ * - nameIdx: Index into global string table for the binding name (e.g., "value", "click")
+ * - bindType: Numeric binding type (0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref)
+ * - deps: Array of interned dependency chains, or null. Each dep is either:
+ *         - A single index (for simple property like "foo")
+ *         - An array of indices (for nested property chain like ["device", "name"])
+ * - id: Expression ID (for property/two-way/class/style) or Handler ID (for event), or null
+ * - extras: Optional object with additional binding metadata:
+ *           - t: Target property name for two-way bindings
+ *           - s: Subscribe source name
+ *           - p: Pipes array of [pipeNameIdx, argExprIds[]]
+ *
+ * The global string table is passed to FluffBase.__setExpressionTable() as the third argument.
+ * The runtime decodes these compact bindings back to BindingInfo objects.
+ */
+export type CompactDep = number | number[];
+
+export type CompactBinding = [
+    number,
+    number,
+    CompactDep[] | null,
+    number | null,
+    Record<string, unknown>?
+];
+
 export class CodeGenerator
 {
     private readonly componentSelectors: Set<string>;
@@ -41,12 +89,14 @@ export class CodeGenerator
     private static globalExprs: string[] = [];
     private static readonly globalHandlerIdsByExpr = new Map<string, number>();
     private static globalHandlers: string[] = [];
+    private static readonly globalStringTable: string[] = [];
+    private static readonly globalStringIndices = new Map<string, number>();
 
     private markerId = 0;
     private readonly markerConfigs = new Map<number, MarkerConfig>();
     private readonly usedExprIds: number[] = [];
     private readonly usedHandlerIds: number[] = [];
-    private readonly bindingsMap = new Map<string, Record<string, unknown>[]>();
+    private readonly bindingsMap = new Map<string, CompactBinding[]>();
     private rootFragment: Parse5DocumentFragment | null = null;
     private readonly collectedTemplates: Parse5Element[] = [];
 
@@ -62,6 +112,26 @@ export class CodeGenerator
         CodeGenerator.globalExprs = [];
         CodeGenerator.globalHandlerIdsByExpr.clear();
         CodeGenerator.globalHandlers = [];
+        CodeGenerator.globalStringTable.length = 0;
+        CodeGenerator.globalStringIndices.clear();
+    }
+
+    private static internString(str: string): number
+    {
+        const existing = CodeGenerator.globalStringIndices.get(str);
+        if (existing !== undefined)
+        {
+            return existing;
+        }
+        const id = CodeGenerator.globalStringTable.length;
+        CodeGenerator.globalStringTable.push(str);
+        CodeGenerator.globalStringIndices.set(str, id);
+        return id;
+    }
+
+    public static getStringTable(): string[]
+    {
+        return CodeGenerator.globalStringTable;
     }
 
     public generateRenderMethod(template: ParsedTemplate, styles?: string): string
@@ -302,7 +372,7 @@ export class CodeGenerator
         return generate(program, { compact: false }).code;
     }
 
-    public getBindingsMap(): Record<string, Record<string, unknown>[]>
+    public getBindingsMap(): Record<string, CompactBinding[]>
     {
         return Object.fromEntries(this.bindingsMap.entries());
     }
@@ -376,6 +446,8 @@ export class CodeGenerator
             return CodeGenerator.buildHandlerArrowFunction(['t', 'l', '__ev'], normalizedHandler);
         });
 
+        const stringElements = CodeGenerator.globalStringTable.map(s => t.stringLiteral(s));
+
         const fluffBaseImport = t.importDeclaration(
             [t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase'))],
             t.stringLiteral('@fluffjs/fluff')
@@ -384,7 +456,11 @@ export class CodeGenerator
         const setExprTableCall = t.expressionStatement(
             t.callExpression(
                 t.memberExpression(t.identifier('FluffBase'), t.identifier('__setExpressionTable')),
-                [t.arrayExpression(exprElements), t.arrayExpression(handlerElements)]
+                [
+                    t.arrayExpression(exprElements),
+                    t.arrayExpression(handlerElements),
+                    t.arrayExpression(stringElements)
+                ]
             )
         );
 
@@ -529,66 +605,76 @@ export class CodeGenerator
         return this.componentSelectors.has(resolvedTagName);
     }
 
-    private serializeBinding(binding: ElementNode['bindings'][number]): Record<string, unknown>
+    private serializeBinding(binding: ElementNode['bindings'][number]): CompactBinding
     {
-        const result: Record<string, unknown> = {
-            n: binding.name,
-            b: binding.binding
-        };
+        const nameIdx = CodeGenerator.internString(binding.name);
+        const bindType = BINDING_TYPE_MAP[binding.binding];
 
         if (binding.binding === 'ref')
         {
-            return result;
+            return [nameIdx, bindType, null, null];
         }
 
-        if (binding.deps)
-        {
-            result.d = binding.deps;
-        }
+        const deps = binding.deps
+            ? binding.deps.map(dep => this.internDep(dep))
+            : null;
 
-        if (binding.subscribe)
-        {
-            result.s = binding.subscribe;
-        }
-
+        let id: number | null = null;
         if (binding.binding === 'event')
         {
             if (!binding.expression)
             {
                 throw new Error(`Event binding for ${binding.name} is missing expression`);
             }
-            result.h = this.internHandler(binding.expression);
-            return result;
-        }
-
-        if (binding.binding === 'two-way')
-        {
-            if (!binding.expression)
-            {
-                throw new Error(`Two-way binding for ${binding.name} is missing expression`);
-            }
-            if (!binding.expression.startsWith('this.'))
-            {
-                throw new Error(`Two-way binding for ${binding.name} must target a component property`);
-            }
-            result.t = binding.expression.slice('this.'.length);
+            id = this.internHandler(binding.expression);
+            return [nameIdx, bindType, deps, id];
         }
 
         if (!binding.expression)
         {
             throw new Error(`Binding for ${binding.name} is missing expression`);
         }
-        result.e = this.internExpression(binding.expression);
+        id = this.internExpression(binding.expression);
+
+        const extras: Record<string, unknown> = {};
+
+        if (binding.binding === 'two-way')
+        {
+            if (!binding.expression.startsWith('this.'))
+            {
+                throw new Error(`Two-way binding for ${binding.name} must target a component property`);
+            }
+            extras.t = binding.expression.slice('this.'.length);
+        }
+
+        if (binding.subscribe)
+        {
+            extras.s = binding.subscribe;
+        }
 
         if (binding.pipes && binding.pipes.length > 0)
         {
-            result.p = binding.pipes.map(pipe => ({
-                n: pipe.name,
-                a: pipe.args.map(arg => this.internExpression(arg))
-            }));
+            extras.p = binding.pipes.map(pipe => ([
+                CodeGenerator.internString(pipe.name),
+                pipe.args.map(arg => this.internExpression(arg))
+            ]));
         }
 
-        return result;
+        if (Object.keys(extras).length > 0)
+        {
+            return [nameIdx, bindType, deps, id, extras];
+        }
+
+        return [nameIdx, bindType, deps, id];
+    }
+
+    private internDep(dep: string | string[]): number | number[]
+    {
+        if (Array.isArray(dep))
+        {
+            return dep.map(s => CodeGenerator.internString(s));
+        }
+        return CodeGenerator.internString(dep);
     }
 
     private internExpression(expr: string): number

@@ -1,8 +1,27 @@
 import * as parse5 from 'parse5';
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { CompactBinding } from './CodeGenerator.js';
 import { CodeGenerator } from './CodeGenerator.js';
 import { TemplateParser } from './TemplateParser.js';
-import { Typeguards } from './Typeguards.js';
+
+const BIND_PROPERTY = 0;
+const BIND_EVENT = 1;
+
+function getBindingName(binding: CompactBinding): string
+{
+    const stringTable = CodeGenerator.getStringTable();
+    return stringTable[binding[0]];
+}
+
+function getBindingType(binding: CompactBinding): number
+{
+    return binding[1];
+}
+
+function getBindingExtras(binding: CompactBinding): Record<string, unknown> | undefined
+{
+    return binding[4];
+}
 
 function extractHtml(renderMethod: string): string
 {
@@ -58,14 +77,22 @@ describe('CodeGenerator', () =>
                 .toHaveLength(4);
             if (Array.isArray(bindings))
             {
-                expect(bindings[0])
-                    .toMatchObject({ n: 'prop1', b: 'property' });
-                expect(bindings[1])
-                    .toMatchObject({ n: 'prop2', b: 'property' });
-                expect(bindings[2])
-                    .toMatchObject({ n: 'event1', b: 'event' });
-                expect(bindings[3])
-                    .toMatchObject({ n: 'event2', b: 'event' });
+                expect(getBindingName(bindings[0]))
+                    .toBe('prop1');
+                expect(getBindingType(bindings[0]))
+                    .toBe(BIND_PROPERTY);
+                expect(getBindingName(bindings[1]))
+                    .toBe('prop2');
+                expect(getBindingType(bindings[1]))
+                    .toBe(BIND_PROPERTY);
+                expect(getBindingName(bindings[2]))
+                    .toBe('event1');
+                expect(getBindingType(bindings[2]))
+                    .toBe(BIND_EVENT);
+                expect(getBindingName(bindings[3]))
+                    .toBe('event2');
+                expect(getBindingType(bindings[3]))
+                    .toBe(BIND_EVENT);
             }
         });
 
@@ -432,17 +459,24 @@ describe('CodeGenerator', () =>
                 .toBe(true);
             if (Array.isArray(bindings))
             {
-                const modelBinding = bindings.find((b: Record<string, unknown>) => b.n === 'model');
+                const modelBinding = bindings.find((b: CompactBinding) => getBindingName(b) === 'model');
                 expect(modelBinding)
                     .toBeDefined();
                 if (modelBinding)
                 {
-                    expect(modelBinding.p)
+                    const extras = getBindingExtras(modelBinding);
+                    expect(extras)
                         .toBeDefined();
-                    if (Array.isArray(modelBinding.p) && Typeguards.hasPipeN(modelBinding.p[0]))
+                    if (extras && Array.isArray(extras.p))
                     {
-                        expect(modelBinding.p[0].n)
-                            .toBe('GetModel');
+                        const [pipe] = extras.p;
+                        if (Array.isArray(pipe) && typeof pipe[0] === 'number')
+                        {
+                            const [pipeNameIdx] = pipe;
+                            const stringTable = CodeGenerator.getStringTable();
+                            expect(stringTable[pipeNameIdx])
+                                .toBe('GetModel');
+                        }
                     }
                 }
             }
@@ -465,22 +499,26 @@ describe('CodeGenerator', () =>
                 .toBe(true);
             if (Array.isArray(bindings))
             {
-                const valueBinding = bindings.find((b: Record<string, unknown>) => b.n === 'value');
+                const valueBinding = bindings.find((b: CompactBinding) => getBindingName(b) === 'value');
                 expect(valueBinding)
                     .toBeDefined();
                 if (valueBinding)
                 {
-                    expect(valueBinding.p)
+                    const extras = getBindingExtras(valueBinding);
+                    expect(extras)
                         .toBeDefined();
-                    if (Array.isArray(valueBinding.p))
+                    if (extras && Array.isArray(extras.p))
                     {
-                        const [pipe] = valueBinding.p;
-                        if (Typeguards.hasPipeN(pipe) && Typeguards.hasPipeA(pipe))
+                        const [pipe] = extras.p;
+                        if (Array.isArray(pipe) && typeof pipe[0] === 'number' && Array.isArray(pipe[1]))
                         {
-                            expect(pipe.n)
+                            const [pipeNameIdx, pipeArgs] = pipe;
+                            const stringTable = CodeGenerator.getStringTable();
+                            expect(stringTable[pipeNameIdx])
                                 .toBe('currency');
-                            const [firstArg] = pipe.a;
-                            expect(typeof firstArg)
+                            expect(Array.isArray(pipeArgs))
+                                .toBe(true);
+                            expect(typeof pipeArgs[0])
                                 .toBe('number');
                         }
                     }

@@ -1,2 +1,3 @@
 dist/
 test-output/
+playwright-report.html
