@@ -922,7 +922,7 @@ Examples:
         console.log('   Checking types...');
         try
         {
-            execSync(`npx tsc --noEmit -p ${target.tsConfigPath}`, {
+            execSync(`npx -p typescript tsc --noEmit -p ${target.tsConfigPath}`, {
                 cwd: projectRoot,
                 stdio: 'inherit'
             });
