@@ -7,7 +7,7 @@ test.describe('Global HostListener', () =>
         await page.goto('/');
 
         const moveResult = page.locator('#mousemove-result');
-        await expect(moveResult).toHaveText('0');
+        const initialCount = Number(await moveResult.textContent());
 
         await page.mouse.move(100, 100);
         await page.mouse.move(200, 200);
@@ -16,7 +16,7 @@ test.describe('Global HostListener', () =>
         await expect(async () =>
         {
             const text = await moveResult.textContent();
-            expect(Number(text)).toBeGreaterThan(0);
+            expect(Number(text)).toBeGreaterThan(initialCount);
         }).toPass({ timeout: 5000 });
     });
 

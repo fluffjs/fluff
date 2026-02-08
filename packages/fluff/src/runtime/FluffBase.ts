@@ -58,6 +58,31 @@ export type CompactBinding = [
     { t?: string; s?: string; p?: [number, number[]][] }?
 ];
 
+/**
+ * Compact Marker Config Format (Decoder)
+ *
+ * Marker configs use the same string table as bindings. Type is numeric:
+ * 0=if, 1=for, 2=text, 3=switch, 4=break
+ *
+ * Format varies by type:
+ * - if:     [0, branches[]] where branch = [exprId?, deps?]
+ * - for:    [1, iteratorIdx, iterableExprId, hasEmpty, deps?, trackByIdx?]
+ * - text:   [2, exprId, deps?, pipes?]
+ * - switch: [3, expressionExprId, deps?, cases[]]
+ * - break:  [4]
+ *
+ * deps are interned as CompactDep[] (same as bindings)
+ * pipes are [pipeNameIdx, argExprIds[]][]
+ */
+const MARKER_TYPES = ['if', 'for', 'text', 'switch', 'break'] as const;
+
+export type CompactMarkerConfig =
+    | [0, ([number | null, CompactDep[] | null] | [])[]]  // if
+    | [1, number, number, boolean, CompactDep[] | null, number | null]  // for
+    | [2, number, CompactDep[] | null, [number, number[]][] | null]  // text
+    | [3, number, CompactDep[] | null, [boolean, boolean, number | null][]]  // switch
+    | [4];  // break
+
 export abstract class FluffBase extends HTMLElement
 {
     public static __e: ExpressionFn[] = [];
@@ -84,13 +109,92 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    private static __decodeDep(dep: CompactDep): PropertyChain
+    public static __decodeString(idx: number): string
+    {
+        return FluffBase.__s[idx];
+    }
+
+    public static __decodeDep(dep: number | number[]): string | string[]
     {
         if (Array.isArray(dep))
         {
             return dep.map(idx => FluffBase.__s[idx]);
         }
         return FluffBase.__s[dep];
+    }
+
+    public static __decodeDeps(deps: (number | number[])[] | null): (string | string[])[] | undefined
+    {
+        if (!deps) return undefined;
+        return deps.map(d => FluffBase.__decodeDep(d));
+    }
+
+    public static __decodeMarkerConfig(compact: CompactMarkerConfig): unknown
+    {
+        const [typeNum] = compact;
+        const type = MARKER_TYPES[typeNum];
+
+        switch (typeNum)
+        {
+            case 0: // if
+            {
+                const [, rawBranches] = compact;
+                const branches = (rawBranches as ([number | null, (number | number[])[] | null] | [])[]).map(b =>
+                {
+                    if (b.length === 0) return {};
+                    const [branchExprId, branchDeps] = b;
+                    const result: { exprId?: number; deps?: (string | string[])[] } = {};
+                    if (branchExprId !== null) result.exprId = branchExprId;
+                    if (branchDeps) result.deps = FluffBase.__decodeDeps(branchDeps);
+                    return result;
+                });
+                return { type, branches };
+            }
+            case 1: // for
+            {
+                const [, iteratorIdx, iterableExprId, hasEmpty, deps, trackByIdx] = compact;
+                const result: Record<string, unknown> = {
+                    type,
+                    iterator: FluffBase.__s[iteratorIdx],
+                    iterableExprId,
+                    hasEmpty
+                };
+                if (deps) result.deps = FluffBase.__decodeDeps(deps);
+                if (trackByIdx !== null) result.trackBy = FluffBase.__s[trackByIdx];
+                return result;
+            }
+            case 2: // text
+            {
+                const [, exprId, deps, pipes] = compact;
+                const result: Record<string, unknown> = { type, exprId };
+                if (deps) result.deps = FluffBase.__decodeDeps(deps);
+                if (pipes)
+                {
+                    result.pipes = pipes.map(([nameIdx, argExprIds]) => ({
+                        name: FluffBase.__s[nameIdx],
+                        argExprIds
+                    }));
+                }
+                return result;
+            }
+            case 3: // switch
+            {
+                const [, expressionExprId, deps, cases] = compact;
+                const result: Record<string, unknown> = { type, expressionExprId };
+                if (deps) result.deps = FluffBase.__decodeDeps(deps);
+                result.cases = cases.map(([isDefault, fallthrough, valueExprId]) =>
+                {
+                    const c: Record<string, unknown> = { isDefault, fallthrough };
+                    if (valueExprId !== null) c.valueExprId = valueExprId;
+                    return c;
+                });
+                return result;
+            }
+            case 4: // break
+                return { type };
+            default:
+                return { type: 'unknown' };
+        }
     }
 
     private static __decodeBinding(compact: CompactBinding): BindingInfo

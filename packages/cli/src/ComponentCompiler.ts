@@ -2,9 +2,11 @@ import type { PluginItem } from '@babel/core';
 import * as babel from '@babel/core';
 import { parse } from '@babel/parser';
 import * as t from '@babel/types';
+import cssnano from 'cssnano';
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import { minify as minifyHtml } from 'html-minifier-terser';
+import postcss from 'postcss';
 import * as parse5 from 'parse5';
 import * as path from 'path';
 import { SourceMapConsumer, SourceMapGenerator } from 'source-map';
@@ -175,6 +177,8 @@ export class ComponentCompiler
 
         if (minify && styles)
         {
+            const nanoResult = await postcss([cssnano({ preset: 'default' })]).process(styles, { from: undefined });
+            styles = nanoResult.css;
             const cssResult = await esbuild.transform(styles, {
                 loader: 'css', minify: true
             });

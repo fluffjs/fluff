@@ -116,7 +116,7 @@ export class CodeGenerator
         CodeGenerator.globalStringIndices.clear();
     }
 
-    private static internString(str: string): number
+    public static internString(str: string): number
     {
         const existing = CodeGenerator.globalStringIndices.get(str);
         if (existing !== undefined)
@@ -218,137 +218,100 @@ export class CodeGenerator
         const entries = Array.from(this.markerConfigs.entries())
             .map(([id, config]) => t.arrayExpression([
                 t.numericLiteral(id),
-                this.buildMarkerConfigObject(config)
+                this.buildMarkerConfigArray(config)
             ]));
 
         return t.arrayExpression(entries);
     }
 
-    private buildMarkerConfigObject(config: MarkerConfig): t.ObjectExpression
+    private buildMarkerConfigArray(config: MarkerConfig): t.ArrayExpression
     {
-        const properties: t.ObjectProperty[] = [
-            t.objectProperty(t.stringLiteral('type'), t.stringLiteral(config.type))
-        ];
+        const MARKER_TYPE_MAP: Record<string, number> = {
+            'if': 0, 'for': 1, 'text': 2, 'switch': 3, 'break': 4
+        };
+        const typeNum = MARKER_TYPE_MAP[config.type];
 
         if (config.type === 'text')
         {
-            properties.push(
-                t.objectProperty(t.stringLiteral('exprId'), t.numericLiteral(config.exprId))
-            );
-            if (config.deps)
-            {
-                properties.push(
-                    t.objectProperty(t.stringLiteral('deps'), this.buildDepsExpression(config.deps))
-                );
-            }
-            if (config.pipes && config.pipes.length > 0)
-            {
-                properties.push(
-                    t.objectProperty(
-                        t.stringLiteral('pipes'),
-                        t.arrayExpression(config.pipes.map(pipe => t.objectExpression([
-                            t.objectProperty(t.stringLiteral('name'), t.stringLiteral(pipe.name)),
-                            t.objectProperty(
-                                t.stringLiteral('argExprIds'),
-                                t.arrayExpression(pipe.argExprIds.map(arg => t.numericLiteral(arg)))
-                            )
-                        ])))
-                    )
-                );
-            }
+            const elements: t.Expression[] = [
+                t.numericLiteral(typeNum),
+                t.numericLiteral(config.exprId),
+                config.deps ? this.buildCompactDepsExpression(config.deps) : t.nullLiteral(),
+                config.pipes && config.pipes.length > 0
+                    ? t.arrayExpression(config.pipes.map(pipe => t.arrayExpression([
+                        t.numericLiteral(CodeGenerator.internString(pipe.name)),
+                        t.arrayExpression(pipe.argExprIds.map(arg => t.numericLiteral(arg)))
+                    ])))
+                    : t.nullLiteral()
+            ];
+            return t.arrayExpression(elements);
         }
         else if (config.type === 'if')
         {
-            properties.push(
-                t.objectProperty(
-                    t.stringLiteral('branches'),
-                    t.arrayExpression(config.branches.map(branch =>
-                    {
-                        const branchProps: t.ObjectProperty[] = [];
-                        if (branch.exprId !== undefined)
-                        {
-                            branchProps.push(
-                                t.objectProperty(t.stringLiteral('exprId'), t.numericLiteral(branch.exprId))
-                            );
-                        }
-                        if (branch.deps)
-                        {
-                            branchProps.push(
-                                t.objectProperty(t.stringLiteral('deps'), this.buildDepsExpression(branch.deps))
-                            );
-                        }
-                        return t.objectExpression(branchProps);
-                    }))
-                )
-            );
+            const branches = t.arrayExpression(config.branches.map(branch =>
+            {
+                if (branch.exprId === undefined && !branch.deps)
+                {
+                    return t.arrayExpression([]);
+                }
+                return t.arrayExpression([
+                    branch.exprId !== undefined ? t.numericLiteral(branch.exprId) : t.nullLiteral(),
+                    branch.deps ? this.buildCompactDepsExpression(branch.deps) : t.nullLiteral()
+                ]);
+            }));
+            return t.arrayExpression([t.numericLiteral(typeNum), branches]);
         }
         else if (config.type === 'for')
         {
-            properties.push(
-                t.objectProperty(t.stringLiteral('iterator'), t.stringLiteral(config.iterator)),
-                t.objectProperty(t.stringLiteral('iterableExprId'), t.numericLiteral(config.iterableExprId)),
-                t.objectProperty(t.stringLiteral('hasEmpty'), t.booleanLiteral(config.hasEmpty))
-            );
-            if (config.deps)
-            {
-                properties.push(
-                    t.objectProperty(t.stringLiteral('deps'), this.buildDepsExpression(config.deps))
-                );
-            }
-            if (config.trackBy !== undefined)
-            {
-                properties.push(
-                    t.objectProperty(t.stringLiteral('trackBy'), t.stringLiteral(config.trackBy))
-                );
-            }
+            return t.arrayExpression([
+                t.numericLiteral(typeNum),
+                t.numericLiteral(CodeGenerator.internString(config.iterator)),
+                t.numericLiteral(config.iterableExprId),
+                t.booleanLiteral(config.hasEmpty),
+                config.deps ? this.buildCompactDepsExpression(config.deps) : t.nullLiteral(),
+                config.trackBy !== undefined
+                    ? t.numericLiteral(CodeGenerator.internString(config.trackBy))
+                    : t.nullLiteral()
+            ]);
         }
         else if (config.type === 'switch')
         {
-            properties.push(
-                t.objectProperty(t.stringLiteral('expressionExprId'), t.numericLiteral(config.expressionExprId))
-            );
-            if (config.deps)
-            {
-                properties.push(
-                    t.objectProperty(t.stringLiteral('deps'), this.buildDepsExpression(config.deps))
-                );
-            }
-            properties.push(
-                t.objectProperty(
-                    t.stringLiteral('cases'),
-                    t.arrayExpression(config.cases.map(caseConfig =>
-                    {
-                        const caseProps: t.ObjectProperty[] = [
-                            t.objectProperty(t.stringLiteral('isDefault'), t.booleanLiteral(caseConfig.isDefault)),
-                            t.objectProperty(t.stringLiteral('fallthrough'), t.booleanLiteral(caseConfig.fallthrough))
-                        ];
-                        if (caseConfig.valueExprId !== undefined)
-                        {
-                            caseProps.push(
-                                t.objectProperty(t.stringLiteral('valueExprId'), t.numericLiteral(caseConfig.valueExprId))
-                            );
-                        }
-                        return t.objectExpression(caseProps);
-                    }))
-                )
-            );
+            const cases = t.arrayExpression(config.cases.map(caseConfig =>
+                t.arrayExpression([
+                    t.booleanLiteral(caseConfig.isDefault),
+                    t.booleanLiteral(caseConfig.fallthrough),
+                    caseConfig.valueExprId !== undefined
+                        ? t.numericLiteral(caseConfig.valueExprId)
+                        : t.nullLiteral()
+                ])
+            ));
+            return t.arrayExpression([
+                t.numericLiteral(typeNum),
+                t.numericLiteral(config.expressionExprId),
+                config.deps ? this.buildCompactDepsExpression(config.deps) : t.nullLiteral(),
+                cases
+            ]);
+        }
+        else if (config.type === 'break')
+        {
+            return t.arrayExpression([t.numericLiteral(typeNum)]);
         }
 
-        return t.objectExpression(properties);
+        return t.arrayExpression([t.numericLiteral(typeNum)]);
     }
 
-    private buildDepsExpression(deps: PropertyChain[]): t.ArrayExpression
+    private buildCompactDepsExpression(deps: PropertyChain[]): t.ArrayExpression
     {
-        return t.arrayExpression(deps.map(dep => this.buildPropertyChainExpression(dep)));
+        return t.arrayExpression(deps.map(dep => this.buildCompactPropertyChainExpression(dep)));
     }
 
-    private buildPropertyChainExpression(dep: PropertyChain): t.Expression
+    private buildCompactPropertyChainExpression(dep: PropertyChain): t.Expression
     {
         if (Array.isArray(dep))
         {
-            return t.arrayExpression(dep.map(part => t.stringLiteral(part)));
+            return t.arrayExpression(dep.map(part => t.numericLiteral(CodeGenerator.internString(part))));
         }
-        return t.stringLiteral(dep);
+        return t.numericLiteral(CodeGenerator.internString(dep));
     }
 
     public generateBindingsSetup(): string

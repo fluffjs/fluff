@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 import { reactivePropertiesMap } from './babel-plugin-reactive.js';
+import { CodeGenerator } from './CodeGenerator.js';
 import { ComponentCompiler } from './ComponentCompiler.js';
 import type { CompileResult } from './interfaces/CompileResult.js';
 import { MarkerConfigAstReader } from './testing/MarkerConfigAstReader.js';
@@ -69,8 +70,10 @@ export class TestComponent extends HTMLElement
             const result = await compiler.compileComponentForBundle(componentPath, false, false, true);
 
             const entries = MarkerConfigAstReader.readMarkerConfigEntries(result.code);
-            const deps = MarkerConfigAstReader.collectDeps(entries);
-            expect(deps)
+            const compactDeps = MarkerConfigAstReader.collectCompactDeps(entries);
+            const stringTable = CodeGenerator.getStringTable();
+            const depStrings = compactDeps.flat().map(idx => stringTable[idx]);
+            expect(depStrings)
                 .toContain('tagsInput');
         }
         finally
@@ -128,8 +131,10 @@ export class TestComponent extends HTMLElement
                 .toContain('items');
 
             const entries = MarkerConfigAstReader.readMarkerConfigEntries(result.code);
-            const deps = MarkerConfigAstReader.collectDeps(entries);
-            expect(deps)
+            const compactDeps = MarkerConfigAstReader.collectCompactDeps(entries);
+            const stringTable = CodeGenerator.getStringTable();
+            const depStrings = compactDeps.flat().map(idx => stringTable[idx]);
+            expect(depStrings)
                 .toContain('items');
         }
         finally

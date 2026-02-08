@@ -152,8 +152,9 @@ export abstract class FluffElement extends FluffBase
         return this._shadowRoot;
     }
 
-    protected __createProp<T>(name: string, options: T | { initialValue: T; [key: string]: unknown }): Property<T>
+    protected __createProp<T>(nameOrIdx: string | number, options: T | { initialValue: T; [key: string]: unknown }): Property<T>
     {
+        const name = typeof nameOrIdx === 'number' ? FluffBase.__decodeString(nameOrIdx) : nameOrIdx;
         const prop = new Property<T>(options);
         Object.defineProperty(this, name, {
             get(): T | null

@@ -68,6 +68,10 @@ export class MarkerConfigAstReader
         const deps: string[] = [];
         for (const [, config] of entries)
         {
+            if (Array.isArray(config))
+            {
+                continue;
+            }
             if (!MarkerConfigAstReader.isRecord(config))
             {
                 continue;
@@ -92,6 +96,91 @@ export class MarkerConfigAstReader
                 case 'switch':
                     MarkerConfigAstReader.collectDepsFromRecord(configRecord, deps);
                     break;
+            }
+        }
+        return deps;
+    }
+
+    private static collectDepsFromCompactConfig(config: MarkerConfigLiteralArray, deps: number[][]): void
+    {
+        const [typeNum] = config;
+        if (typeof typeNum !== 'number') return;
+
+        switch (typeNum)
+        {
+            case 0: // if
+            {
+                const [, branches] = config;
+                if (Array.isArray(branches))
+                {
+                    for (const branch of branches)
+                    {
+                        if (Array.isArray(branch) && branch.length >= 2)
+                        {
+                            const [, branchDeps] = branch;
+                            if (Array.isArray(branchDeps))
+                            {
+                                MarkerConfigAstReader.collectNumberDeps(branchDeps, deps);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            case 1: // for
+            {
+                const [, , , , forDeps] = config;
+                if (Array.isArray(forDeps))
+                {
+                    MarkerConfigAstReader.collectNumberDeps(forDeps, deps);
+                }
+                break;
+            }
+            case 2: // text
+            {
+                const [, , textDeps] = config;
+                if (Array.isArray(textDeps))
+                {
+                    MarkerConfigAstReader.collectNumberDeps(textDeps, deps);
+                }
+                break;
+            }
+            case 3: // switch
+            {
+                const [, , switchDeps] = config;
+                if (Array.isArray(switchDeps))
+                {
+                    MarkerConfigAstReader.collectNumberDeps(switchDeps, deps);
+                }
+                break;
+            }
+        }
+    }
+
+    private static collectNumberDeps(compactDeps: MarkerConfigLiteralArray, deps: number[][]): void
+    {
+        for (const dep of compactDeps)
+        {
+            if (typeof dep === 'number')
+            {
+                deps.push([dep]);
+            }
+            else if (Array.isArray(dep))
+            {
+                const numDeps = dep.filter((d): d is number => typeof d === 'number');
+                deps.push(numDeps);
+            }
+        }
+    }
+
+    public static collectCompactDeps(entries: MarkerConfigEntriesLiteral): number[][]
+    {
+        const deps: number[][] = [];
+        for (const [, config] of entries)
+        {
+            if (Array.isArray(config))
+            {
+                MarkerConfigAstReader.collectDepsFromCompactConfig(config, deps);
             }
         }
         return deps;
@@ -233,7 +322,7 @@ export class MarkerConfigAstReader
                 return false;
             }
             const [id, config] = entry;
-            return typeof id === 'number' && MarkerConfigAstReader.isRecord(config);
+            return typeof id === 'number' && (MarkerConfigAstReader.isRecord(config) || Array.isArray(config));
         });
     }
 

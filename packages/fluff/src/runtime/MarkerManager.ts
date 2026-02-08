@@ -1,6 +1,7 @@
 import type { MarkerConfig } from '../interfaces/MarkerConfig.js';
 import type { MarkerConfigEntries } from './MarkerManagerInterface.js';
 import { BreakController } from './BreakController.js';
+import { FluffBase } from './FluffBase.js';
 import { ForController } from './ForController.js';
 import { IfController } from './IfController.js';
 import { MarkerConfigGuards } from './MarkerConfigGuards.js';
@@ -21,16 +22,54 @@ export class MarkerManager
         this.shadowRoot = shadowRoot;
     }
 
+    private decodeConfig(config: MarkerConfig | unknown[]): MarkerConfig
+    {
+        if (this.isCompactMarkerConfig(config))
+        {
+            const decoded = FluffBase.__decodeMarkerConfig(config);
+            if (this.isMarkerConfig(decoded))
+            {
+                return decoded;
+            }
+            throw new Error('Decoded marker config is invalid');
+        }
+        if (!Array.isArray(config))
+        {
+            return config;
+        }
+        throw new Error('Invalid marker config format');
+    }
+
+    private isMarkerConfig(value: unknown): value is MarkerConfig
+    {
+        if (typeof value !== 'object' || value === null) return false;
+        if (!('type' in value)) return false;
+        const typeVal = (value as { type: unknown }).type;
+        return typeof typeVal === 'string' && ['if', 'for', 'text', 'switch', 'break'].includes(typeVal);
+    }
+
+    private isCompactMarkerConfig(config: MarkerConfig | unknown[]): config is Parameters<typeof FluffBase.__decodeMarkerConfig>[0]
+    {
+        if (!Array.isArray(config)) return false;
+        if (config.length === 0) return false;
+        const firstElement: unknown = config[0];
+        return typeof firstElement === 'number' && firstElement >= 0 && firstElement <= 4;
+    }
+
     public initializeFromConfig(entries: MarkerConfigEntries): void
     {
         this.configs.clear();
-        for (const [id, config] of entries)
+        for (const [id, rawConfig] of entries)
         {
+            const config = this.decodeConfig(rawConfig);
             this.configs.set(id, config);
         }
 
-        for (const [id, config] of entries)
+        for (const [id] of entries)
         {
+            const config = this.configs.get(id);
+            if (!config) continue;
+
             const { startMarker, endMarker } = this.findMarkers(id, config.type);
             if (!startMarker)
             {

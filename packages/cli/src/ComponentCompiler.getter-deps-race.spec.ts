@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
 import { describe, expect, it, vi } from 'vitest';
+import { CodeGenerator } from './CodeGenerator.js';
 import { ComponentCompiler } from './ComponentCompiler.js';
 import type { CompileResult } from './interfaces/CompileResult.js';
 import { TemplateParser } from './TemplateParser.js';
@@ -126,8 +127,10 @@ export class BComponent extends HTMLElement
             const [aResult] = await Promise.all([aPromise, bPromise]);
 
             const entries = MarkerConfigAstReader.readMarkerConfigEntries(aResult.code);
-            const deps = MarkerConfigAstReader.collectDeps(entries);
-            expect(deps)
+            const compactDeps = MarkerConfigAstReader.collectCompactDeps(entries);
+            const stringTable = CodeGenerator.getStringTable();
+            const depStrings = compactDeps.flat().map(idx => stringTable[idx]);
+            expect(depStrings)
                 .toContain('stats');
         }
         finally

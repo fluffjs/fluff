@@ -2,6 +2,7 @@ import type { PluginObj } from '@babel/core';
 import { types as t } from '@babel/core';
 import type { NodePath } from '@babel/traverse';
 import { buildHostBindingUpdateStatement, findDecoratorIndex, getDecoratorName } from './BabelHelpers.js';
+import { CodeGenerator } from './CodeGenerator.js';
 import type { BabelPluginReactiveState } from './interfaces/BabelPluginReactiveState.js';
 import type { BabelPluginReactiveWatchCallInfo } from './interfaces/BabelPluginReactiveWatchCallInfo.js';
 import type { BabelPluginReactiveWatchInfo } from './interfaces/BabelPluginReactiveWatchInfo.js';
@@ -465,9 +466,10 @@ export default function reactivePlugin(): PluginObj<BabelPluginReactiveState>
                     const propertyArgs = useOptionsObject
                         ? [t.objectExpression(propertyOptions)]
                         : [initialValue];
+                    const propNameIdx = CodeGenerator.internString(propName);
                     const createPropCall = t.callExpression(
                         t.memberExpression(t.thisExpression(), t.identifier('__createProp')),
-                        [t.stringLiteral(propName), ...propertyArgs]
+                        [t.numericLiteral(propNameIdx), ...propertyArgs]
                     );
                     const privateField = t.classProperty(t.identifier(privateName), createPropCall);
 
