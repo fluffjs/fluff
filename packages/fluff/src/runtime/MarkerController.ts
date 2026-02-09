@@ -255,7 +255,7 @@ export abstract class MarkerController
             node.setAttribute('data-fluff-scope-id', scopeId);
             this.processBindingsOnNode(node, scope, bindingsSubscriptions);
         }
-        else if (node instanceof HTMLElement && node.hasAttribute('data-lid'))
+        else if (node instanceof Element && node.hasAttribute('data-lid'))
         {
             this.processBindingsOnNode(node, scope, bindingsSubscriptions);
         }
@@ -302,7 +302,7 @@ export abstract class MarkerController
         return content;
     }
 
-    protected processBindingsOnNode(node: HTMLElement, scope: Scope, bindingsSubscriptions?: Subscription[]): void
+    protected processBindingsOnNode(node: Element, scope: Scope, bindingsSubscriptions?: Subscription[]): void
     {
         const fluffHost = this.__getFluffElementHost();
         if (!fluffHost) return;
