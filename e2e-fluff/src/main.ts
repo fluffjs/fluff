@@ -10,3 +10,7 @@ import './app/global-listener-test.component.js';
 import './app/viewchild-test.component.js';
 import './app/hostbinding-test.component.js';
 import './app/watch-test.component.js';
+import './app/native-property-holder.js';
+import './app/native-property-child.component.js';
+import './app/native-property-parent.component.js';
+import './app/svg-for-test.component.js';

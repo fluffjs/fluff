@@ -131,8 +131,8 @@ export class Generator
             private: true,
             type: 'module',
             scripts: {
-                build: 'npx @fluffjs/cli build',
-                serve: 'npx @fluffjs/cli serve'
+                build: 'fluff build',
+                serve: 'fluff serve'
             },
             dependencies: {
                 '@fluffjs/fluff': `^${cliVersion}`

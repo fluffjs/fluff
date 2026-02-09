@@ -214,7 +214,7 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                     t.stringLiteral(VIRTUAL_EXPR_TABLE_ID)
                 );
 
-                ast.program.body.push(exprTableImport);
+                ast.program.body.unshift(exprTableImport);
 
                 const output = generate(ast, { compact: false });
                 return {

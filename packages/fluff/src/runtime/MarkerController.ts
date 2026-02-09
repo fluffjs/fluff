@@ -273,13 +273,33 @@ export abstract class MarkerController
         {
             throw new Error('Expected DocumentFragment from template clone');
         }
-        const nodes = Array.from(content.childNodes);
+
+        const unwrappedContent = this.unwrapNamespaceWrapper(content);
+        const nodes = Array.from(unwrappedContent.childNodes);
         const scope = this.createChildScope(context);
-        this.insertBeforeEndMarker(content);
+        this.insertBeforeEndMarker(unwrappedContent);
         for (const node of nodes)
         {
             this.setScopeOnChildren(node, scope, renderContext, this.markerManager, bindingsSubscriptions);
         }
+    }
+
+    private unwrapNamespaceWrapper(content: DocumentFragment): DocumentFragment
+    {
+        if (content.childNodes.length === 1)
+        {
+            const { firstChild } = content;
+            if (firstChild instanceof Element && firstChild.hasAttribute('data-fluff-ns-wrapper'))
+            {
+                const unwrapped = document.createDocumentFragment();
+                while (firstChild.firstChild)
+                {
+                    unwrapped.appendChild(firstChild.firstChild);
+                }
+                return unwrapped;
+            }
+        }
+        return content;
     }
 
     protected processBindingsOnNode(node: HTMLElement, scope: Scope, bindingsSubscriptions?: Subscription[]): void

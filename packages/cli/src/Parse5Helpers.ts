@@ -1,5 +1,7 @@
 import type * as parse5 from 'parse5';
-import { html as parse5Html } from 'parse5';
+import { html as parse5Html, type html } from 'parse5';
+
+export type Parse5NS = html.NS;
 import type {
     Parse5ChildNode,
     Parse5Document,
@@ -14,14 +16,18 @@ export type Parse5NodeVisitor = (node: Parse5Node) => boolean | undefined;
 
 export class Parse5Helpers
 {
-    public static createElement(tagName: string, attrs: { name: string; value: string }[]): Parse5Element
+    public static readonly NS_HTML = parse5Html.NS.HTML;
+    public static readonly NS_SVG = parse5Html.NS.SVG;
+    public static readonly NS_MATHML = parse5Html.NS.MATHML;
+
+    public static createElement(tagName: string, attrs: { name: string; value: string }[], namespaceURI?: Parse5NS): Parse5Element
     {
         const el: Parse5Element = {
             nodeName: tagName,
             tagName,
             attrs,
             childNodes: [],
-            namespaceURI: parse5Html.NS.HTML,
+            namespaceURI: namespaceURI ?? Parse5Helpers.NS_HTML,
             parentNode: null
         };
 

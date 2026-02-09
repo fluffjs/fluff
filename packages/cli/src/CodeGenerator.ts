@@ -8,7 +8,7 @@ import type { ForMarkerConfig } from './interfaces/ForMarkerConfig.js';
 import type { IfMarkerConfig } from './interfaces/IfMarkerConfig.js';
 import type { SwitchMarkerConfig } from './interfaces/SwitchMarkerConfig.js';
 import type { TextMarkerConfig } from './interfaces/TextMarkerConfig.js';
-import { Parse5Helpers } from './Parse5Helpers.js';
+import { Parse5Helpers, type Parse5NS } from './Parse5Helpers.js';
 import type {
     CommentNode,
     ElementNode,
@@ -99,6 +99,7 @@ export class CodeGenerator
     private readonly bindingsMap = new Map<string, CompactBinding[]>();
     private rootFragment: Parse5DocumentFragment | null = null;
     private readonly collectedTemplates: Parse5Element[] = [];
+    private readonly namespaceStack: Parse5NS[] = [Parse5Helpers.NS_HTML];
 
     public constructor(componentSelectors: Set<string> = new Set<string>(), componentSelector = '')
     {
@@ -149,6 +150,8 @@ export class CodeGenerator
     {
         this.rootFragment = parse5.parseFragment('');
         this.collectedTemplates.length = 0;
+        this.namespaceStack.length = 0;
+        this.namespaceStack.push(Parse5Helpers.NS_HTML);
 
         this.renderNodesToParent(template.root, this.rootFragment);
 
@@ -549,10 +552,50 @@ export class CodeGenerator
             tagName = tagName.slice(RESTRICTED_ELEMENT_PREFIX.length);
         }
 
-        const el = Parse5Helpers.createElement(tagName, attrs);
+        const currentNamespace = this.namespaceStack[this.namespaceStack.length - 1];
+        const elementNamespace = node.namespaceURI ?? currentNamespace;
+
+        const el = Parse5Helpers.createElement(tagName, attrs, elementNamespace);
         Parse5Helpers.appendChild(parent, el);
 
+        if (elementNamespace !== currentNamespace)
+        {
+            this.namespaceStack.push(elementNamespace);
+        }
+
         this.renderNodesToParent(node.children, el);
+
+        if (elementNamespace !== currentNamespace)
+        {
+            this.namespaceStack.pop();
+        }
+    }
+
+    private getCurrentNamespace(): Parse5NS
+    {
+        return this.namespaceStack[this.namespaceStack.length - 1];
+    }
+
+    private renderToTemplateWithNamespace(nodes: TemplateNode[], attrName: string, attrValue: string): Parse5Element
+    {
+        const tpl = Parse5Helpers.createElement('template', [{ name: attrName, value: attrValue }]);
+        const tplContent = Parse5Helpers.getTemplateContent(tpl);
+        const currentNs = this.getCurrentNamespace();
+
+        if (currentNs !== Parse5Helpers.NS_HTML)
+        {
+            const wrapperTag = currentNs === Parse5Helpers.NS_SVG ? 'svg' : 'math';
+            const wrapper = Parse5Helpers.createElement(wrapperTag, [{ name: 'data-fluff-ns-wrapper', value: '' }], currentNs);
+            Parse5Helpers.appendChild(tplContent, wrapper);
+            this.renderNodesToParent(nodes, wrapper);
+        }
+        else
+        {
+            this.renderNodesToParent(nodes, tplContent);
+        }
+
+        this.collectedTemplates.push(tpl);
+        return tpl;
     }
 
     private renderTextToParent(node: TextNode, parent: Parse5DocumentFragment | Parse5Element): void
@@ -717,9 +760,7 @@ export class CodeGenerator
         {
             const branch = node.branches[i];
             const templateId = `${this.componentSelector}-${id}-${i}`;
-            const tpl = Parse5Helpers.createElement('template', [{ name: 'data-fluff-branch', value: templateId }]);
-            this.renderNodesToParent(branch.children, Parse5Helpers.getTemplateContent(tpl));
-            this.collectedTemplates.push(tpl);
+            this.renderToTemplateWithNamespace(branch.children, 'data-fluff-branch', templateId);
         }
 
         Parse5Helpers.appendComment(parent, `/fluff:if:${id}`);
@@ -741,15 +782,11 @@ export class CodeGenerator
         Parse5Helpers.appendComment(parent, `fluff:for:${id}`);
 
         const templateId = `${this.componentSelector}-${id}`;
-        const tpl = Parse5Helpers.createElement('template', [{ name: 'data-fluff-tpl', value: templateId }]);
-        this.renderNodesToParent(node.children, Parse5Helpers.getTemplateContent(tpl));
-        this.collectedTemplates.push(tpl);
+        this.renderToTemplateWithNamespace(node.children, 'data-fluff-tpl', templateId);
 
         if (node.emptyContent)
         {
-            const emptyTpl = Parse5Helpers.createElement('template', [{ name: 'data-fluff-empty', value: templateId }]);
-            this.renderNodesToParent(node.emptyContent, Parse5Helpers.getTemplateContent(emptyTpl));
-            this.collectedTemplates.push(emptyTpl);
+            this.renderToTemplateWithNamespace(node.emptyContent, 'data-fluff-empty', templateId);
         }
 
         Parse5Helpers.appendComment(parent, `/fluff:for:${id}`);
@@ -776,9 +813,7 @@ export class CodeGenerator
         {
             const caseNode = node.cases[i];
             const templateId = `${this.componentSelector}-${id}-${i}`;
-            const tpl = Parse5Helpers.createElement('template', [{ name: 'data-fluff-case', value: templateId }]);
-            this.renderNodesToParent(caseNode.children, Parse5Helpers.getTemplateContent(tpl));
-            this.collectedTemplates.push(tpl);
+            this.renderToTemplateWithNamespace(caseNode.children, 'data-fluff-case', templateId);
         }
 
         Parse5Helpers.appendComment(parent, `/fluff:switch:${id}`);

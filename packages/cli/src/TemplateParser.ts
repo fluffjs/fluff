@@ -481,7 +481,8 @@ export class TemplateParser
             tagName: element.tagName,
             attributes,
             bindings,
-            children
+            children,
+            namespaceURI: element.namespaceURI
         };
 
         if (hasBindings)
