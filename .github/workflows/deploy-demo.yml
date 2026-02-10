@@ -38,6 +38,9 @@ jobs:
       - name: Build demo app
         run: npm run cli -- --no-gzip build fluff-demo-app
 
+      - name: Copy static files
+        run: cp -r ./.github/static/* ./dist/apps/fluff-demo-app/
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
