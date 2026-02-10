@@ -1,5 +1,5 @@
 import type { CompactMarkerConfig } from './FluffBase.js';
-import type { MarkerConfigEntries } from './MarkerManagerInterface.js';
+import type { MarkerConfigEntries, MarkerManagerInterface } from './MarkerManagerInterface.js';
 import { BreakController } from './BreakController.js';
 import { ForController } from './ForController.js';
 import { IfController } from './IfController.js';
@@ -9,7 +9,7 @@ import { TextController } from './TextController.js';
 
 const MARKER_TYPES = ['if', 'for', 'text', 'switch', 'break'] as const;
 
-export class MarkerManager
+export class MarkerManager implements MarkerManagerInterface
 {
     private readonly controllers = new Map<number, Map<Comment, MarkerController>>();
     private readonly configs = new Map<number, CompactMarkerConfig>();

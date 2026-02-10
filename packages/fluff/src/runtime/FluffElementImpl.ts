@@ -2,12 +2,11 @@ import { getDirectiveClass } from '../decorators/Directive.js';
 import { getPipeTransform } from '../decorators/Pipe.js';
 import type { ElementWithDirectives } from '../interfaces/ElementWithDirectives.js';
 import type { Subscription } from '../interfaces/Subscription.js';
-import { Property } from '../utils/Property.js';
 import { FluffBase } from './FluffBase.js';
 import type { FluffDirective } from './FluffDirective.js';
 import { MarkerManager } from './MarkerManager.js';
 import type { MarkerConfigEntries, MarkerManagerInterface } from './MarkerManagerInterface.js';
-import { getScope, type Scope } from './ScopeRegistry.js';
+import { getScope, unregisterScope, type Scope } from './ScopeRegistry.js';
 
 export abstract class FluffElement extends FluffBase
 {
@@ -19,6 +18,7 @@ export abstract class FluffElement extends FluffBase
     private _markerManager: MarkerManagerInterface | null = null;
     private _markerConfigEntries: MarkerConfigEntries | null = null;
     private _MarkerManagerClass: (new (host: FluffElement, shadowRoot: ShadowRoot) => MarkerManagerInterface) | null = null;
+    private _scopeId: string | null = null;
 
     public constructor()
     {
@@ -44,10 +44,10 @@ export abstract class FluffElement extends FluffBase
                 return;
             }
 
-            const scopeId = this.getAttribute('data-fluff-scope-id');
-            if (scopeId && !this.__parentScope)
+            this._scopeId = this.getAttribute('data-fluff-scope-id');
+            if (this._scopeId && !this.__parentScope)
             {
-                this.__parentScope = getScope(scopeId);
+                this.__parentScope = getScope(this._scopeId);
                 if (this.__parentScope)
                 {
                     this.__loopContext = this.__parentScope.locals;
@@ -72,7 +72,7 @@ export abstract class FluffElement extends FluffBase
             this.__setupBindings();
             this.__initHostBindings();
 
-            if (this.getAttribute('data-fluff-scope-id'))
+            if (this._scopeId)
             {
                 this.__processBindings();
             }
@@ -111,6 +111,12 @@ export abstract class FluffElement extends FluffBase
             sub.unsubscribe();
         }
         this.__baseSubscriptions = [];
+
+        if (this._scopeId)
+        {
+            unregisterScope(this._scopeId);
+            this._scopeId = null;
+        }
     }
 
     private __destroyDirectives(): void
@@ -185,17 +191,6 @@ export abstract class FluffElement extends FluffBase
         }
     }
 
-    protected __pipe(name: string, value: unknown, ...args: unknown[]): unknown
-    {
-        const pipe = this.__pipes[name];
-        if (!pipe)
-        {
-            console.warn(`Pipe "${name}" not found`);
-            return value;
-        }
-        return pipe(value, ...args);
-    }
-
     protected override __getPipeFn(name: string): ((value: unknown, ...args: unknown[]) => unknown) | undefined
     {
         return this.__pipes[name] ?? getPipeTransform(name);
@@ -255,24 +250,6 @@ export abstract class FluffElement extends FluffBase
         }
     }
 
-    protected override __getReactivePropFromScope(propName: string, scope: Scope): Property<unknown> | undefined
-    {
-        const key = `__${propName}`;
-        if (key in scope.host)
-        {
-            const candidate: unknown = Reflect.get(scope.host, key);
-            if (candidate instanceof Property)
-            {
-                return candidate;
-            }
-        }
-        if (scope.parent)
-        {
-            return this.__getReactivePropFromScope(propName, scope.parent);
-        }
-        return undefined;
-    }
-
     protected __processBindings(): void
     {
         const elements = this._shadowRoot.querySelectorAll('[data-lid]');
@@ -284,8 +261,4 @@ export abstract class FluffElement extends FluffBase
             this.__processBindingsOnElement(el, scope);
         }
     }
-
-
-
-
 }

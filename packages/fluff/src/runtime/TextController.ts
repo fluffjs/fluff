@@ -37,22 +37,14 @@ export class TextController extends MarkerController<CompactTextConfig>
 
     private formatValue(result: unknown): string
     {
-        if (result === null || result === undefined)
-        {
-            return '';
-        }
-        if (typeof result === 'object')
-        {
-            return JSON.stringify(result);
-        }
         if (typeof result === 'string')
         {
             return result;
         }
-        if (typeof result === 'number' || typeof result === 'boolean')
+        if (typeof result === 'number' || typeof result === 'boolean' || typeof result === 'bigint')
         {
             return String(result);
         }
-        return '';
+        return JSON.stringify(result);
     }
 }

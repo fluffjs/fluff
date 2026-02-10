@@ -4,16 +4,10 @@ import type { RenderContext } from '../interfaces/RenderContext.js';
 import type { Subscription } from '../interfaces/Subscription.js';
 import { FluffBase, type CompactMarkerConfig } from './FluffBase.js';
 import { FluffElement } from './FluffElement.js';
+import type { MarkerManagerInterface } from './MarkerManagerInterface.js';
 import { registerScope, type Scope } from './ScopeRegistry.js';
 
 const MARKER_REGEX = /^fluff:(if|for|switch|text|break):(\d+)$/;
-
-interface MarkerManagerLike
-{
-    getController: (id: number, startMarker: Comment) => MarkerController | undefined;
-    ensureController?: (id: number, type: string, startMarker: Comment, endMarker: Comment | null) => MarkerController | undefined;
-    cleanupController?: (id: number, startMarker?: Comment) => void;
-}
 
 export abstract class MarkerController<TConfig extends CompactMarkerConfig = CompactMarkerConfig>
 {
@@ -23,7 +17,7 @@ export abstract class MarkerController<TConfig extends CompactMarkerConfig = Com
     protected readonly shadowRoot: ShadowRoot;
     protected parentScope: Scope | undefined;
     protected loopContext: Record<string, unknown> = {};
-    protected markerManager: MarkerManagerLike | undefined;
+    protected markerManager: MarkerManagerInterface | undefined;
 
     public constructor(protected readonly id: number, protected readonly startMarker: Comment, protected readonly endMarker: Comment | null, host: FluffHostElement, shadowRoot: ShadowRoot, protected readonly config: TConfig)
     {
@@ -41,7 +35,7 @@ export abstract class MarkerController<TConfig extends CompactMarkerConfig = Com
         this.loopContext = context;
     }
 
-    public setMarkerManager(markerManager: MarkerManagerLike): void
+    public setMarkerManager(markerManager: MarkerManagerInterface): void
     {
         this.markerManager = markerManager;
     }
@@ -161,7 +155,7 @@ export abstract class MarkerController<TConfig extends CompactMarkerConfig = Com
             if (current instanceof Comment)
             {
                 const markerMatch = MARKER_REGEX.exec(current.data);
-                if (markerMatch && this.markerManager?.cleanupController)
+                if (markerMatch && this.markerManager)
                 {
                     const markerId = parseInt(markerMatch[2], 10);
                     this.markerManager.cleanupController(markerId, current);
@@ -202,7 +196,7 @@ export abstract class MarkerController<TConfig extends CompactMarkerConfig = Com
         return this.host instanceof FluffElement ? this.host : null;
     }
 
-    protected setScopeOnChildren(node: Node, scope: Scope, renderContext?: RenderContext, markerManager?: MarkerManagerLike, bindingsSubscriptions?: Subscription[]): void
+    protected setScopeOnChildren(node: Node, scope: Scope, renderContext?: RenderContext, markerManager?: MarkerManagerInterface, bindingsSubscriptions?: Subscription[]): void
     {
         if (node instanceof Comment)
         {
@@ -215,7 +209,7 @@ export abstract class MarkerController<TConfig extends CompactMarkerConfig = Com
 
                 let controller = markerManager.getController(markerId, node);
                 const shouldInitialize = controller === undefined;
-                if (!controller && markerManager.ensureController)
+                if (!controller)
                 {
                     let endMarker: Comment | null = null;
                     let current: Node | null = node.nextSibling;
