@@ -1,7 +1,10 @@
+import { getDirectiveClass } from '../decorators/Directive.js';
 import { getPipeTransform } from '../decorators/Pipe.js';
+import type { ElementWithDirectives } from '../interfaces/ElementWithDirectives.js';
 import type { Subscription } from '../interfaces/Subscription.js';
 import { Property } from '../utils/Property.js';
 import { FluffBase } from './FluffBase.js';
+import type { FluffDirective } from './FluffDirective.js';
 import { MarkerManager } from './MarkerManager.js';
 import type { MarkerConfigEntries, MarkerManagerInterface } from './MarkerManagerInterface.js';
 import { getScope, type Scope } from './ScopeRegistry.js';
@@ -67,6 +70,7 @@ export abstract class FluffElement extends FluffBase
 
             this.__render();
             this.__setupBindings();
+            this.__initHostBindings();
 
             if (this.getAttribute('data-fluff-scope-id'))
             {
@@ -88,6 +92,8 @@ export abstract class FluffElement extends FluffBase
             this.onDestroy();
         }
 
+        this.__destroyDirectives();
+
         if (this._markerManager)
         {
             this._markerManager.cleanup();
@@ -105,6 +111,23 @@ export abstract class FluffElement extends FluffBase
             sub.unsubscribe();
         }
         this.__baseSubscriptions = [];
+    }
+
+    private __destroyDirectives(): void
+    {
+        const elements = this._shadowRoot.querySelectorAll('[data-fluff-directives]');
+        for (const el of Array.from(elements))
+        {
+            const directives = (el as ElementWithDirectives).__fluffDirectives;
+            if (directives)
+            {
+                for (const directive of directives)
+                {
+                    directive.destroy();
+                }
+                (el as ElementWithDirectives).__fluffDirectives = undefined;
+            }
+        }
     }
 
     public override $watch = (_properties: string[], callback: (changed: string) => void): Subscription =>
@@ -127,8 +150,39 @@ export abstract class FluffElement extends FluffBase
     protected __setupBindings(): void
     {
         this.__initializeMarkers(MarkerManager);
+        this.__instantiateDirectives();
         this.__processBindings();
         this.__initializeMarkersInternal();
+    }
+
+    private __instantiateDirectives(): void
+    {
+        const elements = this._shadowRoot.querySelectorAll('[data-fluff-directives]');
+        for (const el of Array.from(elements))
+        {
+            const directiveAttr = el.getAttribute('data-fluff-directives');
+            if (!directiveAttr) continue;
+
+            const selectors = directiveAttr.split(',');
+            const directives: FluffDirective[] = [];
+
+            for (const selector of selectors)
+            {
+                const DirectiveClass = getDirectiveClass(selector.trim());
+                if (DirectiveClass && el instanceof HTMLElement)
+                {
+                    const instance = new DirectiveClass();
+                    instance.__setHostElement(el);
+                    directives.push(instance);
+                    instance.initialize();
+                }
+            }
+
+            if (directives.length > 0)
+            {
+                (el as ElementWithDirectives).__fluffDirectives = directives;
+            }
+        }
     }
 
     protected __pipe(name: string, value: unknown, ...args: unknown[]): unknown
@@ -152,45 +206,6 @@ export abstract class FluffElement extends FluffBase
         return this._shadowRoot;
     }
 
-    protected __createProp<T>(nameOrIdx: string | number, options: T | { initialValue: T; [key: string]: unknown }): Property<T>
-    {
-        const name = typeof nameOrIdx === 'number' ? FluffBase.__decodeString(nameOrIdx) : nameOrIdx;
-        const prop = new Property<T>(options);
-        Object.defineProperty(this, name, {
-            get(): T | null
-            {
-                return prop.getValue();
-            },
-            set(v: T): void
-            {
-                prop.setValue(v);
-            },
-            enumerable: true,
-            configurable: true
-        });
-        return prop;
-    }
-
-    protected __defineClassHostBinding(name: string, className: string, privateName: string): void
-    {
-        Object.defineProperty(this, name, {
-            get: (): boolean => Boolean(Reflect.get(this, privateName)),
-            set: (v: boolean): void =>
-            {
-                Reflect.set(this, privateName, v);
-                if (v)
-                {
-                    this.classList.add(className);
-                }
-                else
-                {
-                    this.classList.remove(className);
-                }
-            },
-            enumerable: true,
-            configurable: true
-        });
-    }
 
     protected __setMarkerConfigs(entries: MarkerConfigEntries): void
     {
@@ -226,6 +241,18 @@ export abstract class FluffElement extends FluffBase
         }
 
         super.__setChildProperty(el, propName, value);
+
+        const directives = (el as ElementWithDirectives).__fluffDirectives;
+        if (directives)
+        {
+            for (const directive of directives)
+            {
+                if (propName in directive)
+                {
+                    Reflect.set(directive, propName, value);
+                }
+            }
+        }
     }
 
     protected override __getReactivePropFromScope(propName: string, scope: Scope): Property<unknown> | undefined
@@ -259,38 +286,6 @@ export abstract class FluffElement extends FluffBase
     }
 
 
-    private __applyPendingProps(): void
-    {
-        const existing: unknown = Reflect.get(this, '__pendingProps');
-        if (!this.isRecord(existing))
-        {
-            return;
-        }
-        for (const [propName, value] of Object.entries(existing))
-        {
-            console.log('apply-pending-prop', { propName, value, el: this.tagName });
-            const key = `__${propName}`;
-            if (key in this)
-            {
-                const prop: unknown = Reflect.get(this, key);
-                if (prop instanceof Property)
-                {
-                    prop.setValue(value, true);
-                }
-            }
-            else if (propName in this)
-            {
-                Reflect.set(this, propName, value);
-            }
-        }
-
-        Reflect.deleteProperty(this, '__pendingProps');
-    }
-
-    private isRecord(value: unknown): value is Record<string, unknown>
-    {
-        return value !== null && typeof value === 'object' && !Array.isArray(value);
-    }
 
 
 }

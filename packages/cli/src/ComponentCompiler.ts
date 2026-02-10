@@ -14,6 +14,8 @@ import type { ClassTransformOptions } from './babel-plugin-class-transform.js';
 import classTransformPlugin from './babel-plugin-class-transform.js';
 import type { ComponentMetadata } from './babel-plugin-component.js';
 import componentPlugin, { componentMetadataMap } from './babel-plugin-component.js';
+import type { DirectiveMetadata } from './babel-plugin-directive.js';
+import directivePlugin, { directiveMetadataMap } from './babel-plugin-directive.js';
 import type { ImportTransformOptions } from './babel-plugin-imports.js';
 import importsPlugin from './babel-plugin-imports.js';
 import reactivePlugin, { reactivePropertiesMap } from './babel-plugin-reactive.js';
@@ -39,6 +41,8 @@ export type { CompileResult } from './interfaces/CompileResult.js';
 export class ComponentCompiler
 {
     private readonly componentSelectors = new Set<string>();
+    private readonly directiveSelectors = new Set<string>();
+    private readonly directivePaths: string[] = [];
 
     private getReactivePropsForFile(filePath: string): Set<string>
     {
@@ -99,6 +103,11 @@ export class ComponentCompiler
         }
     }
 
+    public getDirectivePaths(): string[]
+    {
+        return [...this.directivePaths];
+    }
+
     public async discoverComponents(dir: string): Promise<string[]>
     {
         const componentPaths: string[] = [];
@@ -114,11 +123,20 @@ export class ComponentCompiler
             else if (entry.name.endsWith('.ts'))
             {
                 const content = fs.readFileSync(fullPath, 'utf-8');
-                const metadata = await this.extractComponentMetadata(content, fullPath);
-                if (metadata?.selector)
+                const componentMeta = await this.extractComponentMetadata(content, fullPath);
+                if (componentMeta?.selector)
                 {
-                    this.componentSelectors.add(metadata.selector);
+                    this.componentSelectors.add(componentMeta.selector);
                     componentPaths.push(fullPath);
+                }
+                else
+                {
+                    const directiveResult = await this.extractDirectiveMetadata(content, fullPath);
+                    if (directiveResult?.metadata.selector)
+                    {
+                        this.directiveSelectors.add(directiveResult.metadata.selector);
+                        this.directivePaths.push(fullPath);
+                    }
                 }
             }
         }
@@ -191,7 +209,7 @@ export class ComponentCompiler
 
         const parsed = await parser.parse(templateHtml);
         parser.setGetterDependencyMap(new Map());
-        const gen = new CodeGenerator(this.componentSelectors, selector);
+        const gen = new CodeGenerator(this.componentSelectors, selector, this.directiveSelectors);
         let generatedHtml = gen.generateHtml(parsed);
 
         if (minify)
@@ -280,7 +298,7 @@ export class ComponentCompiler
     {
         const importOptions: ImportTransformOptions = {
             removeImportsFrom: ['lighter'],
-            removeDecorators: ['Component', 'Input', 'Output'],
+            removeDecorators: ['Component', 'Directive', 'Input', 'Output'],
             pathReplacements: {},
             addJsExtension: false
         };
@@ -349,6 +367,108 @@ export class ComponentCompiler
             console.error(`Failed to extract component metadata from ${filePath}:`, ErrorHelpers.getErrorMessage(e));
             return null;
         }
+    }
+
+    public async extractDirectiveMetadata(code: string, filePath: string): Promise<{ metadata: DirectiveMetadata; transformedCode: string } | null>
+    {
+        try
+        {
+            directiveMetadataMap.delete(filePath);
+
+            const result = await this.runBabelTransform(code, filePath, {
+                useTypeScriptPreset: true,
+                useDecoratorSyntax: true,
+                plugins: [directivePlugin],
+                errorContext: 'Failed to extract directive metadata'
+            });
+
+            const metadata = directiveMetadataMap.get(filePath);
+            if (!metadata) return null;
+
+            return { metadata, transformedCode: result };
+        }
+        catch(e)
+        {
+            console.error(`Failed to extract directive metadata from ${filePath}:`, ErrorHelpers.getErrorMessage(e));
+            return null;
+        }
+    }
+
+    public async compileDirectiveForBundle(filePath: string, sourcemap?: boolean, production?: boolean): Promise<CompileResult>
+    {
+        let source = fs.readFileSync(filePath, 'utf-8');
+
+        reactivePropertiesMap.delete(filePath);
+
+        if (source.includes('@Reactive') || source.includes('@Input') || source.includes('@HostListener') || source.includes('@HostBinding') || source.includes('@Watch') || source.includes('@LinkedProperty') || source.includes('@HostElement'))
+        {
+            source = await this.transformReactiveProperties(source, filePath, production);
+        }
+
+        const extractResult = await this.extractDirectiveMetadata(source, filePath);
+        if (!extractResult)
+        {
+            return { code: source };
+        }
+
+        const { metadata, transformedCode } = extractResult;
+        const { className, selector } = metadata;
+        source = transformedCode;
+
+        let result = await this.transformImportsForBundle(source, filePath);
+
+        result = await this.transformClass(result, filePath, {
+            className, originalSuperClass: 'HTMLElement', newSuperClass: 'FluffDirective', injectMethods: []
+        });
+
+        result = this.addFluffDirectiveImport(result);
+        result = this.addDirectiveRegistration(result, selector, className);
+
+        DecoratorValidator.validate(result, filePath);
+
+        const tsResult = await this.stripTypeScriptWithSourceMap(result, filePath, sourcemap);
+
+        return { code: tsResult.code };
+    }
+
+    private addDirectiveRegistration(code: string, selector: string, className: string): string
+    {
+        const ast = parse(code, { sourceType: 'module' });
+
+        const tagName = 'x-fluff-dir-' + className.toLowerCase().replace(/directive$/, '');
+        const defineCall = t.expressionStatement(
+            t.callExpression(
+                t.memberExpression(t.identifier('customElements'), t.identifier('define')),
+                [t.stringLiteral(tagName), t.identifier(className)]
+            )
+        );
+        ast.program.body.push(defineCall);
+
+        const registerCall = t.expressionStatement(
+            t.callExpression(
+                t.identifier('__registerDirective'),
+                [t.stringLiteral(selector), t.identifier(className)]
+            )
+        );
+        ast.program.body.push(registerCall);
+
+        return generate(ast, { compact: false }).code;
+    }
+
+    private addFluffDirectiveImport(code: string): string
+    {
+        const ast = parse(code, { sourceType: 'module', plugins: ['typescript', 'decorators'] });
+
+        const importSpecifiers = [
+            t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase')),
+            t.importSpecifier(t.identifier('FluffDirective'), t.identifier('FluffDirective')),
+            t.importSpecifier(t.identifier('__registerDirective'), t.identifier('__registerDirective'))
+        ];
+        const importDecl = t.importDeclaration(importSpecifiers, t.stringLiteral('@fluffjs/fluff'));
+
+        ast.program.body.unshift(importDecl);
+
+        return generate(ast, { compact: false }).code;
     }
 
     public async transformClass(code: string, filePath: string, options: ClassTransformOptions): Promise<string>

@@ -3,6 +3,7 @@ import type { Subscription } from '../interfaces/Subscription.js';
 import { Property } from '../utils/Property.js';
 import { Publisher } from '../utils/Publisher.js';
 import type { Scope } from './ScopeRegistry.js';
+import type { ElementWithDirectives } from '../interfaces/ElementWithDirectives.js';
 
 export type ExpressionFn = (t: unknown, l: Record<string, unknown>) => unknown;
 export type HandlerFn = (t: unknown, l: Record<string, unknown>, e: unknown) => void;
@@ -693,7 +694,8 @@ export abstract class FluffBase extends HTMLElement
         }
         const handlerFn = this.__getCompiledHandlerFn(binding.h);
 
-        if (el.hasAttribute('x-fluff-component'))
+        const hasDirectives = el.hasAttribute('data-fluff-directives');
+        if (el.hasAttribute('x-fluff-component') || hasDirectives)
         {
             this.__applyOutputBinding(el, binding.n, handlerFn, scope);
         }
@@ -715,9 +717,8 @@ export abstract class FluffBase extends HTMLElement
 
     private __applyOutputBinding(el: Element, outputName: string, handlerFn: HandlerFn, scope: Scope): void
     {
-        const trySubscribe = (): boolean =>
+        const subscribeToPublisher = (publisher: unknown): boolean =>
         {
-            const publisher: unknown = Reflect.get(el, outputName);
             if (publisher instanceof Publisher)
             {
                 const sub = publisher.subscribe((value: unknown) =>
@@ -737,15 +738,43 @@ export abstract class FluffBase extends HTMLElement
             return false;
         };
 
-        if (trySubscribe())
+        const subscribeToElement = (): boolean =>
         {
-            return;
-        }
+            const publisher: unknown = Reflect.get(el, outputName);
+            return subscribeToPublisher(publisher);
+        };
 
-        this.__whenDefined(el.tagName.toLowerCase(), () =>
+        const subscribeToDirectives = (): boolean =>
         {
-            trySubscribe();
-        });
+            let subscribed = false;
+            const directives = (el as ElementWithDirectives).__fluffDirectives;
+            if (directives)
+            {
+                for (const directive of directives)
+                {
+                    const directivePublisher: unknown = Reflect.get(directive, outputName);
+                    if (subscribeToPublisher(directivePublisher))
+                    {
+                        subscribed = true;
+                    }
+                }
+            }
+            return subscribed;
+        };
+
+        subscribeToDirectives();
+
+        if (!subscribeToElement())
+        {
+            const tagName = el.tagName.toLowerCase();
+            if (tagName.includes('-'))
+            {
+                this.__whenDefined(tagName, () =>
+                {
+                    subscribeToElement();
+                });
+            }
+        }
     }
 
     protected __whenDefined(tagName: string, callback: () => void): void
@@ -845,5 +874,87 @@ export abstract class FluffBase extends HTMLElement
     private __hasStyle(el: Element): el is ElementWithStyle
     {
         return 'style' in el;
+    }
+
+    protected __createProp<T>(nameOrIdx: string | number, options: T | { initialValue: T; [key: string]: unknown }): Property<T>
+    {
+        const name = typeof nameOrIdx === 'number' ? FluffBase.__decodeString(nameOrIdx) : nameOrIdx;
+        const prop = new Property<T>(options);
+        Object.defineProperty(this, name, {
+            get(): T | null
+            {
+                return prop.getValue();
+            },
+            set(v: T): void
+            {
+                prop.setValue(v);
+            },
+            enumerable: true,
+            configurable: true
+        });
+        return prop;
+    }
+
+    protected __defineClassHostBinding(name: string, className: string, privateName: string): void
+    {
+        const host = this.__getHostElement();
+        Object.defineProperty(this, name, {
+            get: (): boolean => Boolean(Reflect.get(this, privateName)),
+            set: (v: boolean): void =>
+            {
+                Reflect.set(this, privateName, v);
+                if (v)
+                {
+                    host.classList.add(className);
+                }
+                else
+                {
+                    host.classList.remove(className);
+                }
+            },
+            enumerable: true,
+            configurable: true
+        });
+    }
+
+    protected __applyPendingProps(): void
+    {
+        const existing: unknown = Reflect.get(this, '__pendingProps');
+        if (!this.__isRecord(existing))
+        {
+            return;
+        }
+        for (const [propName, value] of Object.entries(existing))
+        {
+            const key = `__${propName}`;
+            if (key in this)
+            {
+                const prop: unknown = Reflect.get(this, key);
+                if (prop instanceof Property)
+                {
+                    prop.setValue(value, true);
+                }
+            }
+            else if (propName in this)
+            {
+                Reflect.set(this, propName, value);
+            }
+        }
+
+        Reflect.deleteProperty(this, '__pendingProps');
+    }
+
+    protected __isRecord(value: unknown): value is Record<string, unknown>
+    {
+        return value !== null && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    protected __getHostElement(): HTMLElement
+    {
+        return this;
+    }
+
+    protected __initHostBindings(): void
+    {
     }
 }

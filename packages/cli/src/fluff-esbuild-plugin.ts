@@ -56,12 +56,13 @@ function getEntryPointPath(build: Parameters<Plugin['setup']>[0]): string | null
 interface FileDecorators
 {
     hasComponent: boolean;
+    hasDirective: boolean;
     hasPipe: boolean;
 }
 
 function detectDecorators(source: string): FileDecorators
 {
-    const result: FileDecorators = { hasComponent: false, hasPipe: false };
+    const result: FileDecorators = { hasComponent: false, hasDirective: false, hasPipe: false };
 
     try
     {
@@ -80,6 +81,7 @@ function detectDecorators(source: string): FileDecorators
                     {
                         const { name } = decorator.expression.callee;
                         if (name === 'Component') result.hasComponent = true;
+                        if (name === 'Directive') result.hasDirective = true;
                         if (name === 'Pipe') result.hasPipe = true;
                     }
                 }
@@ -92,6 +94,7 @@ function detectDecorators(source: string): FileDecorators
                     {
                         const { name } = decorator.expression.callee;
                         if (name === 'Component') result.hasComponent = true;
+                        if (name === 'Directive') result.hasDirective = true;
                         if (name === 'Pipe') result.hasPipe = true;
                     }
                 }
@@ -104,6 +107,7 @@ function detectDecorators(source: string): FileDecorators
                     {
                         const { name } = decorator.expression.callee;
                         if (name === 'Component') result.hasComponent = true;
+                        if (name === 'Directive') result.hasDirective = true;
                         if (name === 'Pipe') result.hasPipe = true;
                     }
                 }
@@ -188,6 +192,20 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                     };
                 }
 
+                if (decorators.hasDirective)
+                {
+                    const result = await compiler.compileDirectiveForBundle(
+                        args.path,
+                        options.sourcemap,
+                        options.production
+                    );
+                    return {
+                        contents: result.code,
+                        loader: 'js',
+                        resolveDir: path.dirname(args.path)
+                    };
+                }
+
                 if (decorators.hasPipe)
                 {
                     const transformed = await compiler.transformPipeDecorators(source, args.path);
@@ -231,9 +249,11 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
 
             build.onLoad({ filter: /.*/, namespace: 'fluff-virtual' }, () =>
             {
+                const directivePaths = compiler.getDirectivePaths();
+                const directiveImports = directivePaths.map(p => `import '${p}';`).join('\n');
                 const exprTable = CodeGenerator.generateGlobalExprTable();
                 return {
-                    contents: exprTable || '',
+                    contents: directiveImports + '\n' + (exprTable || ''),
                     loader: 'js',
                     resolveDir: options.srcDir
                 };

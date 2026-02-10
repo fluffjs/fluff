@@ -477,6 +477,33 @@ export default function reactivePlugin(): PluginObj<BabelPluginReactiveState>
                     privateFields.push(privateField);
                 }
 
+                const reactiveProps = state.reactiveProperties ?? new Set<string>();
+                const constructorStatements: t.Statement[] = [];
+
+                for (const { propName, className, privateName } of classHostBindingDefs)
+                {
+                    constructorStatements.push(t.expressionStatement(
+                        t.callExpression(
+                            t.memberExpression(t.thisExpression(), t.identifier('__defineClassHostBinding')),
+                            [t.stringLiteral(propName), t.stringLiteral(className), t.stringLiteral(privateName)]
+                        )
+                    ));
+                }
+
+                const initHostBindingsStatements: t.Statement[] = [];
+
+                for (const { updateMethodName, watchedProps } of getterHostBindingUpdates)
+                {
+                    initHostBindingsStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier(updateMethodName)), [])));
+                    for (const prop of watchedProps)
+                    {
+                        if (reactiveProps.has(prop))
+                        {
+                            initHostBindingsStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.memberExpression(t.thisExpression(), t.identifier('__baseSubscriptions')), t.identifier('push')), [t.callExpression(t.memberExpression(t.memberExpression(t.memberExpression(t.thisExpression(), t.identifier(`__${prop}`)), t.identifier('onChange')), t.identifier('subscribe')), [t.arrowFunctionExpression([], t.callExpression(t.memberExpression(t.thisExpression(), t.identifier(updateMethodName)), []))])])));
+                        }
+                    }
+                }
+
                 for (const p of propsToRemove)
                 {
                     p.remove();
@@ -536,31 +563,6 @@ export default function reactivePlugin(): PluginObj<BabelPluginReactiveState>
 
                                 path.unshiftContainer('body', pipesFromClasses);
                             }
-                        }
-                    }
-                }
-
-                const reactiveProps = state.reactiveProperties ?? new Set<string>();
-                const constructorStatements: t.Statement[] = [];
-
-                for (const { propName, className, privateName } of classHostBindingDefs)
-                {
-                    constructorStatements.push(t.expressionStatement(
-                        t.callExpression(
-                            t.memberExpression(t.thisExpression(), t.identifier('__defineClassHostBinding')),
-                            [t.stringLiteral(propName), t.stringLiteral(className), t.stringLiteral(privateName)]
-                        )
-                    ));
-                }
-
-                for (const { updateMethodName, watchedProps } of getterHostBindingUpdates)
-                {
-                    constructorStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier(updateMethodName)), [])));
-                    for (const prop of watchedProps)
-                    {
-                        if (reactiveProps.has(prop))
-                        {
-                            constructorStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.memberExpression(t.thisExpression(), t.identifier('__baseSubscriptions')), t.identifier('push')), [t.callExpression(t.memberExpression(t.memberExpression(t.memberExpression(t.thisExpression(), t.identifier(`__${prop}`)), t.identifier('onChange')), t.identifier('subscribe')), [t.arrowFunctionExpression([], t.callExpression(t.memberExpression(t.thisExpression(), t.identifier(updateMethodName)), []))])])));
                         }
                     }
                 }
@@ -654,7 +656,10 @@ export default function reactivePlugin(): PluginObj<BabelPluginReactiveState>
 
                     if (target === 'this')
                     {
-                        constructorStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier('addEventListener')), [
+                        initHostBindingsStatements.push(t.expressionStatement(t.callExpression(t.memberExpression(
+                            t.callExpression(t.memberExpression(t.thisExpression(), t.identifier('__getHostElement')), []),
+                            t.identifier('addEventListener')
+                        ), [
                             t.stringLiteral(baseEvent),
                             handlerFn
                         ])));
@@ -681,6 +686,17 @@ export default function reactivePlugin(): PluginObj<BabelPluginReactiveState>
                             [t.stringLiteral(baseEvent), t.memberExpression(t.thisExpression(), t.identifier(handlerPropName))]
                         )));
                     }
+                }
+
+                if (initHostBindingsStatements.length > 0)
+                {
+                    const initHostBindingsMethod = t.classMethod(
+                        'method',
+                        t.identifier('__initHostBindings'),
+                        [],
+                        t.blockStatement(initHostBindingsStatements)
+                    );
+                    path.unshiftContainer('body', initHostBindingsMethod);
                 }
 
                 if (constructorStatements.length > 0)

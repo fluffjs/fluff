@@ -84,6 +84,7 @@ export type CompactBinding = [
 export class CodeGenerator
 {
     private readonly componentSelectors: Set<string>;
+    private readonly directiveSelectors: Set<string>;
     private readonly componentSelector: string;
     private static readonly globalExprIdsByExpr = new Map<string, number>();
     private static globalExprs: string[] = [];
@@ -101,10 +102,11 @@ export class CodeGenerator
     private readonly collectedTemplates: Parse5Element[] = [];
     private readonly namespaceStack: Parse5NS[] = [Parse5Helpers.NS_HTML];
 
-    public constructor(componentSelectors: Set<string> = new Set<string>(), componentSelector = '')
+    public constructor(componentSelectors: Set<string> = new Set<string>(), componentSelector = '', directiveSelectors: Set<string> = new Set<string>())
     {
         this.componentSelectors = componentSelectors;
         this.componentSelector = componentSelector;
+        this.directiveSelectors = directiveSelectors;
     }
 
     public static resetGlobalState(): void
@@ -520,6 +522,12 @@ export class CodeGenerator
             attrs.push({ name: 'x-fluff-component', value: '' });
         }
 
+        const matchedDirectives = this.findMatchingDirectives(node);
+        if (matchedDirectives.length > 0)
+        {
+            attrs.push({ name: 'data-fluff-directives', value: matchedDirectives.join(',') });
+        }
+
         for (const [name, value] of Object.entries(node.attributes))
         {
             attrs.push({ name, value });
@@ -609,6 +617,32 @@ export class CodeGenerator
             ? tagName.slice(RESTRICTED_ELEMENT_PREFIX.length)
             : tagName;
         return this.componentSelectors.has(resolvedTagName);
+    }
+
+    private findMatchingDirectives(node: ElementNode): string[]
+    {
+        const matched: string[] = [];
+        for (const selector of this.directiveSelectors)
+        {
+            if (this.matchesDirectiveSelector(node, selector))
+            {
+                matched.push(selector);
+            }
+        }
+        return matched;
+    }
+
+    private matchesDirectiveSelector(node: ElementNode, selector: string): boolean
+    {
+        if (selector.startsWith('[') && selector.endsWith(']'))
+        {
+            const attrName = selector.slice(1, -1);
+            const attrNameLower = attrName.toLowerCase();
+            const hasAttr = attrNameLower in node.attributes;
+            const hasBinding = node.bindings.some(b => b.name === attrName);
+            return hasAttr || hasBinding;
+        }
+        return false;
     }
 
     private serializeBinding(binding: ElementNode['bindings'][number]): CompactBinding

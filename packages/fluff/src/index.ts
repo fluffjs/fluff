@@ -1,6 +1,9 @@
 export { Component } from './decorators/Component.js';
 export type { ComponentConfig, ComponentMetadata } from './decorators/Component.js';
+export { Directive, getDirectiveClass, getDirectiveSelectors, __registerDirective } from './decorators/Directive.js';
+export type { DirectiveConfig, DirectiveMetadata } from './decorators/Directive.js';
 export { HostBinding } from './decorators/HostBinding.js';
+export { HostElement } from './decorators/HostElement.js';
 export { HostListener } from './decorators/HostListener.js';
 export { Input } from './decorators/Input.js';
 export { LinkedProperty } from './decorators/LinkedProperty.js';
@@ -13,6 +16,7 @@ export { Watch } from './decorators/Watch.js';
 
 export { FluffBase } from './runtime/FluffElement.js';
 export { FluffElement } from './runtime/FluffElement.js';
+export { FluffDirective } from './runtime/FluffDirective.js';
 export { MarkerManager } from './runtime/FluffMarkers.js';
 
 export { Property } from './utils/Property.js';

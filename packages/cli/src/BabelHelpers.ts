@@ -68,6 +68,14 @@ export function parseMethodBody(body: string): t.Statement[]
     return [];
 }
 
+function buildHostElementCall(): t.CallExpression
+{
+    return t.callExpression(
+        t.memberExpression(t.thisExpression(), t.identifier('__getHostElement')),
+        []
+    );
+}
+
 export function buildHostBindingUpdateStatement(hostProperty: string): t.Statement
 {
     if (hostProperty.startsWith('class.'))
@@ -78,7 +86,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
             t.expressionStatement(
                 t.callExpression(
                     t.memberExpression(
-                        t.memberExpression(t.thisExpression(), t.identifier('classList')),
+                        t.memberExpression(buildHostElementCall(), t.identifier('classList')),
                         t.identifier('add')
                     ),
                     [t.stringLiteral(className)]
@@ -87,7 +95,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
             t.expressionStatement(
                 t.callExpression(
                     t.memberExpression(
-                        t.memberExpression(t.thisExpression(), t.identifier('classList')),
+                        t.memberExpression(buildHostElementCall(), t.identifier('classList')),
                         t.identifier('remove')
                     ),
                     [t.stringLiteral(className)]
@@ -102,7 +110,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
             t.binaryExpression('!=', t.identifier('__v'), t.nullLiteral()),
             t.expressionStatement(
                 t.callExpression(
-                    t.memberExpression(t.thisExpression(), t.identifier('setAttribute')),
+                    t.memberExpression(buildHostElementCall(), t.identifier('setAttribute')),
                     [
                         t.stringLiteral(attrName),
                         t.callExpression(t.identifier('String'), [t.identifier('__v')])
@@ -111,7 +119,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
             ),
             t.expressionStatement(
                 t.callExpression(
-                    t.memberExpression(t.thisExpression(), t.identifier('removeAttribute')),
+                    t.memberExpression(buildHostElementCall(), t.identifier('removeAttribute')),
                     [t.stringLiteral(attrName)]
                 )
             )
@@ -124,7 +132,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
             t.assignmentExpression(
                 '=',
                 t.memberExpression(
-                    t.memberExpression(t.thisExpression(), t.identifier('style')),
+                    t.memberExpression(buildHostElementCall(), t.identifier('style')),
                     t.identifier(styleProp)
                 ),
                 t.logicalExpression('||', t.identifier('__v'), t.stringLiteral(''))
@@ -136,7 +144,7 @@ export function buildHostBindingUpdateStatement(hostProperty: string): t.Stateme
         return t.expressionStatement(
             t.assignmentExpression(
                 '=',
-                t.memberExpression(t.thisExpression(), t.identifier(hostProperty)),
+                t.memberExpression(buildHostElementCall(), t.identifier(hostProperty)),
                 t.identifier('__v')
             )
         );
