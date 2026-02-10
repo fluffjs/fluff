@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { FluffBase } from './FluffBase.js';
 import { FluffElement } from './FluffElement.js';
 import { hasValue } from './tests/typeguards.js';
 import { TestHarness } from './tests/TestHarness.js';
@@ -43,9 +44,11 @@ describe('__processBindings should not search beneath x-fluff-component elements
 
         TestHarness.defineCustomElement('test-parent-skip2', ParentComponent);
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('textContent', 'item');
         ParentComponent.__bindings = {
-            l0: [{ n: 'textContent', b: 'property', e: 0 }],
-            l1: [{ n: 'item', b: 'property', e: 0 }]
+            l0: [[bi, 0, null, 0]],
+            l1: [[bi + 1, 0, null, 0]]
         };
 
         const parent = TestHarness.mount('test-parent-skip2');

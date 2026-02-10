@@ -35,16 +35,10 @@ describe('Property binding with pipes', () =>
             }
         ], []);
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('value', 'amount', 'double');
         Reflect.set(TestPropertyBindingPipeParentComponent, '__bindings', {
-            l0: [
-                {
-                    n: 'value',
-                    b: 'property',
-                    d: ['amount'],
-                    e: 0,
-                    p: [{ n: 'double', a: [] }]
-                }
-            ]
+            l0: [[bi, 0, [bi + 1], 0, { p: [[bi + 2, []]] }]]
         });
 
         const childTag = 'test-prop-binding-pipe-child-' + Math.random()
@@ -100,16 +94,10 @@ describe('Property binding with pipes', () =>
         const ChildComponent = createChildComponent();
         const ParentComponent = createParentComponent();
 
+        const bi2 = FluffBase.__s.length;
+        FluffBase.__s.push('value', 'amount', 'addSuffix');
         Reflect.set(ParentComponent, '__bindings', {
-            l0: [
-                {
-                    n: 'value',
-                    b: 'property',
-                    d: ['amount'],
-                    e: 0,
-                    p: [{ n: 'addSuffix', a: [1] }]
-                }
-            ]
+            l0: [[bi2, 0, [bi2 + 1], 0, { p: [[bi2 + 2, [1]]] }]]
         });
 
         customElements.define(childTag, ChildComponent);

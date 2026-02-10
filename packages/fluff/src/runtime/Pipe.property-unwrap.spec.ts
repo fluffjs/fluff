@@ -82,16 +82,10 @@ describe('Pipe property unwrapping', () =>
             }
         ], []);
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('value', 'testProp', 'capture');
         Reflect.set(ParentComponent, '__bindings', {
-            l0: [
-                {
-                    n: 'value',
-                    b: 'property',
-                    d: ['testProp'],
-                    e: 0,
-                    p: [{ n: 'capture', a: [] }]
-                }
-            ]
+            l0: [[bi, 0, [bi + 1], 0, { p: [[bi + 2, []]] }]]
         });
 
         customElements.define(childTag, ChildComponent);

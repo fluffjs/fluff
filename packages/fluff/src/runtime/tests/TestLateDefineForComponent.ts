@@ -1,3 +1,4 @@
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -24,8 +25,10 @@ export class TestLateDefineForComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('column', 'columns');
         this.__setMarkerConfigs([
-            [0, { type: 'for', iterator: 'column', iterableExprId: 0, deps: ['columns'], hasEmpty: false }]
+            [0, [1, si, 0, false, [si + 1], null]]
         ]);
     }
 

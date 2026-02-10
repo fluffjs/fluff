@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FluffBase } from './FluffBase.js';
 import { TestForChildComponent } from './tests/TestForChildComponent.js';
 import { TestForComponent } from './tests/TestForComponent.js';
 import { TestHarness } from './tests/TestHarness.js';
@@ -29,8 +30,10 @@ describe('fluff:for', () =>
     {
         TestHarness.defineCustomElement('test-for-child', TestForChildComponent);
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('value');
         TestForComponent.__bindings = {
-            l0: [{ n: 'value', b: 'property', e: 1 }]
+            l0: [[bi, 0, null, 1]]
         };
 
         TestHarness.defineCustomElement('test-for-component', TestForComponent);

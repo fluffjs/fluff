@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FluffBase } from './FluffBase.js';
 import { TestLateDefineForChildComponent } from './tests/TestLateDefineForChildComponent.js';
 import { type TestLateDefineForColumn, TestLateDefineForComponent } from './tests/TestLateDefineForComponent.js';
 import { isLateDefineForColumn } from './tests/typeguards.js';
@@ -35,8 +36,10 @@ describe('fluff:for (late custom element define)', () =>
 
     it('should apply per-iteration property bindings even if child custom element is defined later', async() =>
     {
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('column');
         TestLateDefineForComponent.__bindings = {
-            l0: [{ n: 'column', b: 'property', e: 1 }]
+            l0: [[bi, 0, null, 1]]
         };
 
         TestHarness.defineCustomElement('late-define-for-component', TestLateDefineForComponent);

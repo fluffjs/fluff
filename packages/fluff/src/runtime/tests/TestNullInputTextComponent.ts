@@ -1,4 +1,5 @@
 import { Property as PropertyImpl } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -43,9 +44,11 @@ export class TestNullInputTextComponent extends FluffElement
                     <template data-fluff-branch="test-null-input-text-0-1"></template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('isEditing', 'task');
         this.__setMarkerConfigs([
-            [0, { type: 'if', branches: [{ exprId: 0, deps: ['isEditing'] }, { exprId: undefined, deps: [] }] }],
-            [1, { type: 'text', exprId: 1, deps: ['task'], pipes: [] }]
+            [0, [0, [[0, [si]], []]]],
+            [1, [2, 1, [si + 1], null]]
         ]);
     }
 

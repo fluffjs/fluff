@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 import type { TestInterpolationPipeComponentConstructor } from './createTestInterpolationPipeComponent.js';
@@ -34,8 +35,10 @@ export function createTestInterpolationPipeWithArgsComponent(): TestInterpolatio
         protected override __render(): void
         {
             this.__getShadowRoot().innerHTML = '<span><!--fluff:text:0--><!--/fluff:text:0--></span>';
+            const si = FluffBase.__s.length;
+            FluffBase.__s.push('message', 'truncate');
             this.__setMarkerConfigs([
-                [0, { type: 'text', exprId: 0, deps: ['message'], pipes: [{ name: 'truncate', argExprIds: [1] }] }]
+                [0, [2, 0, [si], [[si + 1, [1]]]]]
             ]);
         }
 

@@ -38,8 +38,10 @@ describe('Watch with nested Property bindings', () =>
             }
         ], []);
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('property', 'hostClass', 'childProp');
         Reflect.set(TestWatchNestedPropertyParentComponent, '__bindings', {
-            l0: [{ n: 'property', b: 'property', d: [['hostClass', 'childProp']], e: 0 }]
+            l0: [[bi, 0, [[bi + 1, bi + 2]], 0]]
         });
 
         const childTag = 'test-watch-nested-child-' + Math.random()
@@ -99,8 +101,10 @@ describe('Watch with nested Property bindings', () =>
             }
         ], []);
 
+        const bi2 = FluffBase.__s.length;
+        FluffBase.__s.push('property', 'hostClass', 'childProp');
         Reflect.set(TestWatchNestedPropertyParentComponent2, '__bindings', {
-            l0: [{ n: 'property', b: 'property', d: [['hostClass', 'childProp']], e: 0 }]
+            l0: [[bi2, 0, [[bi2 + 1, bi2 + 2]], 0]]
         });
 
         const childTag = 'test-watch-nested-resub-child-' + Math.random()

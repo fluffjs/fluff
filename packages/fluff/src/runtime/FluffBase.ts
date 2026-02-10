@@ -13,50 +13,35 @@ interface ElementWithStyle extends Element
     style: CSSStyleDeclaration;
 }
 
-const BINDING_TYPES = ['property', 'event', 'two-way', 'class', 'style', 'ref'] as const;
-
-export interface BindingInfo
-{
-    n: string;
-    b: 'property' | 'event' | 'two-way' | 'class' | 'style' | 'ref';
-    e?: number;
-    h?: number;
-    t?: string;
-    d?: PropertyChain[];
-    s?: string;
-    p?: { n: string; a: number[] }[];
-}
-
 /**
- * Compact Binding Format (Decoder)
+ * Compact Binding Format
  *
- * Bindings are received as tuples to minimize bundle size. All strings are
+ * Bindings are consumed as tuples to minimize bundle size. All strings are
  * stored in a global string table (FluffBase.__s) and referenced by index.
  *
  * Format: [nameIdx, bindType, deps, id, extras?]
  *
- * - nameIdx: Index into __s for the binding name (e.g., "value", "click")
- * - bindType: Numeric binding type (0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref)
- * - deps: Array of interned dependency chains, or null. Each dep is either:
- *         - A single index (for simple property like "foo")
- *         - An array of indices (for nested property chain like ["device", "name"])
- * - id: Expression ID (for property/two-way/class/style) or Handler ID (for event), or null
- * - extras: Optional object with additional binding metadata:
- *           - t: Target property name for two-way bindings
- *           - s: Subscribe source name
- *           - p: Pipes array of [pipeNameIdx, argExprIds[]]
+ * [0] nameIdx:  Index into __s for the binding target name (e.g., "value", "click")
+ * [1] bindType: Numeric binding type: 0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref
+ * [2] deps:     Array of dependency chains (CompactDep[]) or null. Each dep is either:
+ *               - A single number index (simple property, e.g. "foo")
+ *               - An array of number indices (nested chain, e.g. ["device", "name"])
+ * [3] id:       Expression ID (property/two-way/class/style) or Handler ID (event), or null
+ * [4] extras:   Optional object with additional binding metadata:
+ *               - t: Target property name string for two-way bindings
+ *               - s: Subscribe source property name string
+ *               - p: Pipes as [pipeNameIdx, argExprIds[]][] (compact pipe format)
  *
  * The string table is set via FluffBase.__setExpressionTable(exprs, handlers, strings).
- * __decodeBinding() converts CompactBinding back to BindingInfo for runtime use.
  */
 type CompactDep = number | number[];
 
 export type CompactBinding = [
-    number,
-    number,
-    CompactDep[] | null,
-    number | null,
-    { t?: string; s?: string; p?: [number, number[]][] }?
+    number,              // [0] nameIdx
+    number,              // [1] bindType: 0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref
+    CompactDep[] | null, // [2] deps
+    number | null,       // [3] exprId or handlerId
+    { t?: string; s?: string; p?: [number, number[]][] }?  // [4] extras
 ];
 
 /**
@@ -75,21 +60,29 @@ export type CompactBinding = [
  * deps are interned as CompactDep[] (same as bindings)
  * pipes are [pipeNameIdx, argExprIds[]][]
  */
-const MARKER_TYPES = ['if', 'for', 'text', 'switch', 'break'] as const;
+// [0, branches[]]  —  branch = [exprId?, deps?] or [] for else
+export type CompactIfConfig = [0, ([number | null, CompactDep[] | null] | [])[]];  // if
 
-export type CompactMarkerConfig =
-    | [0, ([number | null, CompactDep[] | null] | [])[]]  // if
-    | [1, number, number, boolean, CompactDep[] | null, number | null]  // for
-    | [2, number, CompactDep[] | null, [number, number[]][] | null]  // text
-    | [3, number, CompactDep[] | null, [boolean, boolean, number | null][]]  // switch
-    | [4];  // break
+// [1, iteratorNameIdx, iterableExprId, hasEmpty, deps, trackByNameIdx]
+export type CompactForConfig = [1, number, number, boolean, CompactDep[] | null, number | null];  // for
+
+// [2, exprId, deps, pipes]  —  pipes = [pipeNameIdx, argExprIds[]][]
+export type CompactTextConfig = [2, number, CompactDep[] | null, [number, number[]][] | null];  // text
+
+// [3, exprId, deps, cases[]]  —  case = [isDefault, fallthrough, valueExprId]
+export type CompactSwitchConfig = [3, number, CompactDep[] | null, [boolean, boolean, number | null][]];  // switch
+
+// [4]  —  no additional data
+export type CompactBreakConfig = [4];  // break
+
+export type CompactMarkerConfig = CompactIfConfig | CompactForConfig | CompactTextConfig | CompactSwitchConfig | CompactBreakConfig;
 
 export abstract class FluffBase extends HTMLElement
 {
     public static __e: ExpressionFn[] = [];
     public static __h: HandlerFn[] = [];
     public static __s: string[] = [];
-    public static __bindings: Record<string, (CompactBinding | BindingInfo)[]> = {};
+    public static __bindings: Record<string, CompactBinding[]> = {};
     private static __expressionsReady = false;
     private static readonly __pendingInitCallbacks: (() => void)[] = [];
 
@@ -110,11 +103,6 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    public static __decodeString(idx: number): string
-    {
-        return FluffBase.__s[idx];
-    }
-
     public static __decodeDep(dep: number | number[]): string | string[]
     {
         if (Array.isArray(dep))
@@ -128,121 +116,6 @@ export abstract class FluffBase extends HTMLElement
     {
         if (!deps) return undefined;
         return deps.map(d => FluffBase.__decodeDep(d));
-    }
-
-    public static __decodeMarkerConfig(compact: CompactMarkerConfig): unknown
-    {
-        const [typeNum] = compact;
-        const type = MARKER_TYPES[typeNum];
-
-        switch (typeNum)
-        {
-            case 0: // if
-            {
-                const [, rawBranches] = compact;
-                const branches = (rawBranches as ([number | null, (number | number[])[] | null] | [])[]).map(b =>
-                {
-                    if (b.length === 0) return {};
-                    const [branchExprId, branchDeps] = b;
-                    const result: { exprId?: number; deps?: (string | string[])[] } = {};
-                    if (branchExprId !== null) result.exprId = branchExprId;
-                    if (branchDeps) result.deps = FluffBase.__decodeDeps(branchDeps);
-                    return result;
-                });
-                return { type, branches };
-            }
-            case 1: // for
-            {
-                const [, iteratorIdx, iterableExprId, hasEmpty, deps, trackByIdx] = compact;
-                const result: Record<string, unknown> = {
-                    type,
-                    iterator: FluffBase.__s[iteratorIdx],
-                    iterableExprId,
-                    hasEmpty
-                };
-                if (deps) result.deps = FluffBase.__decodeDeps(deps);
-                if (trackByIdx !== null) result.trackBy = FluffBase.__s[trackByIdx];
-                return result;
-            }
-            case 2: // text
-            {
-                const [, exprId, deps, pipes] = compact;
-                const result: Record<string, unknown> = { type, exprId };
-                if (deps) result.deps = FluffBase.__decodeDeps(deps);
-                if (pipes)
-                {
-                    result.pipes = pipes.map(([nameIdx, argExprIds]) => ({
-                        name: FluffBase.__s[nameIdx],
-                        argExprIds
-                    }));
-                }
-                return result;
-            }
-            case 3: // switch
-            {
-                const [, expressionExprId, deps, cases] = compact;
-                const result: Record<string, unknown> = { type, expressionExprId };
-                if (deps) result.deps = FluffBase.__decodeDeps(deps);
-                result.cases = cases.map(([isDefault, fallthrough, valueExprId]) =>
-                {
-                    const c: Record<string, unknown> = { isDefault, fallthrough };
-                    if (valueExprId !== null) c.valueExprId = valueExprId;
-                    return c;
-                });
-                return result;
-            }
-            case 4: // break
-                return { type };
-            default:
-                return { type: 'unknown' };
-        }
-    }
-
-    private static __decodeBinding(compact: CompactBinding): BindingInfo
-    {
-        const [nameIdx, bType, deps, id, extras] = compact;
-        const n = FluffBase.__s[nameIdx];
-        const b = BINDING_TYPES[bType];
-
-        const result: BindingInfo = { n, b };
-
-        if (deps)
-        {
-            result.d = deps.map(d => FluffBase.__decodeDep(d));
-        }
-
-        if (b === 'event')
-        {
-            if (id !== null)
-            {
-                result.h = id;
-            }
-        }
-        else if (id !== null)
-        {
-            result.e = id;
-        }
-
-        if (extras)
-        {
-            if (extras.t)
-            {
-                result.t = extras.t;
-            }
-            if (extras.s)
-            {
-                result.s = extras.s;
-            }
-            if (extras.p)
-            {
-                result.p = extras.p.map(([pipeNameIdx, args]) => ({
-                    n: FluffBase.__s[pipeNameIdx],
-                    a: args
-                }));
-            }
-        }
-
-        return result;
     }
 
     public static __areExpressionsReady(): boolean
@@ -286,22 +159,23 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    public __applyPipesForController(value: unknown, pipes: { name: string; argExprIds: number[] }[], locals: Record<string, unknown>): unknown
+    public __applyPipesForController(value: unknown, pipes: [number, number[]][], locals: Record<string, unknown>): unknown
     {
         let result = value;
         if (result instanceof Property)
         {
             result = result.getValue();
         }
-        for (const pipe of pipes)
+        for (const [nameIdx, argExprIds] of pipes)
         {
-            const pipeFn = this.__getPipeFn(pipe.name);
+            const name = FluffBase.__s[nameIdx];
+            const pipeFn = this.__getPipeFn(name);
             if (!pipeFn)
             {
-                console.warn(`Pipe "${pipe.name}" not found`);
+                console.warn(`Pipe "${name}" not found`);
                 continue;
             }
-            const args = pipe.argExprIds.map(id => this.__getCompiledExprFn(id)(this, locals));
+            const args = argExprIds.map(id => this.__getCompiledExprFn(id)(this, locals));
             result = pipeFn(result, ...args);
         }
         return result;
@@ -321,58 +195,50 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    private __getBindingsForLid(lid: string): BindingInfo[] | undefined
+    private __getBindingsForLid(lid: string): CompactBinding[] | undefined
     {
         const ctor: unknown = this.constructor;
         if (typeof ctor === 'function')
         {
-            const bindings = Reflect.get(ctor, '__bindings') as unknown;
-            if (this.__isBindingsMap(bindings))
+            const bindings: unknown = Reflect.get(ctor, '__bindings');
+            if (this.__isRecord(bindings) && lid in bindings)
             {
-                const lidBindings = bindings[lid];
-                if (lidBindings)
+                const lidBindings: unknown = bindings[lid];
+                if (this.__isCompactBindingArray(lidBindings))
                 {
-                    return lidBindings.map(b => FluffBase.__decodeBindingAny(b));
+                    return lidBindings;
                 }
             }
         }
         return undefined;
     }
 
-    private static __decodeBindingAny(binding: CompactBinding | BindingInfo): BindingInfo
+    private __isCompactBindingArray(value: unknown): value is CompactBinding[]
     {
-        if (Array.isArray(binding))
-        {
-            return FluffBase.__decodeBinding(binding);
-        }
-        return binding;
+        return Array.isArray(value);
     }
 
-    private __isBindingsMap(value: unknown): value is Record<string, (CompactBinding | BindingInfo)[]>
+    // CompactBinding[1] type dispatch: 0=property, 1=event, 2=two-way, 3=class, 4=style, 5=ref
+    protected __applyBindingWithScope(el: Element, binding: CompactBinding, scope: Scope, subscriptions?: Subscription[]): void
     {
-        return !(!value || typeof value !== 'object');
-    }
-
-    protected __applyBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void
-    {
-        switch (binding.b)
+        switch (binding[1])
         {
-            case 'property':
+            case 0:
                 this.__applyPropertyBindingWithScope(el, binding, scope, subscriptions);
                 break;
-            case 'event':
+            case 1:
                 this.__applyEventBindingWithScope(el, binding, scope);
                 break;
-            case 'two-way':
+            case 2:
                 this.__applyTwoWayBindingWithScope(el, binding, scope, subscriptions);
                 break;
-            case 'class':
+            case 3:
                 this.__applyClassBindingWithScope(el, binding, scope, subscriptions);
                 break;
-            case 'style':
+            case 4:
                 this.__applyStyleBindingWithScope(el, binding, scope, subscriptions);
                 break;
-            case 'ref':
+            case 5:
                 break;
         }
     }
@@ -395,11 +261,6 @@ export abstract class FluffBase extends HTMLElement
             throw new Error(`Missing compiled handler function for handlerId ${handlerId}`);
         }
         return fn;
-    }
-
-    protected __applyPipes(value: unknown, pipes: { n: string; a: number[] }[], locals: Record<string, unknown>): unknown
-    {
-        return this.__applyPipesForController(value, pipes.map(p => ({ name: p.n, argExprIds: p.a })), locals);
     }
 
     protected __getPipeFn(_name: string): ((value: unknown, ...args: unknown[]) => unknown) | undefined
@@ -453,47 +314,7 @@ export abstract class FluffBase extends HTMLElement
         const reactiveProp = this.__getReactivePropFromScope(first, scope);
         if (reactiveProp)
         {
-            if (rest.length === 0)
-            {
-                addSub(reactiveProp.onChange.subscribe(callback));
-            }
-            else
-            {
-                let nestedSubs: Subscription[] = [];
-
-                const resubscribeNested = (): void =>
-                {
-                    for (const sub of nestedSubs)
-                    {
-                        sub.unsubscribe();
-                    }
-                    nestedSubs = [];
-
-                    const currentValue: unknown = reactiveProp.getValue();
-                    if (currentValue !== null && currentValue !== undefined)
-                    {
-                        this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
-                        {
-                            nestedSubs.push(sub);
-                            addSub(sub);
-                        });
-                    }
-
-                    callback();
-                };
-
-                addSub(reactiveProp.onChange.subscribe(resubscribeNested));
-
-                const currentValue: unknown = reactiveProp.getValue();
-                if (currentValue !== null && currentValue !== undefined)
-                {
-                    this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
-                    {
-                        nestedSubs.push(sub);
-                        addSub(sub);
-                    });
-                }
-            }
+            this.__subscribeToProp(reactiveProp, rest, callback, addSub);
         }
         else if (first in scope.locals)
         {
@@ -509,6 +330,50 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
+    private __subscribeToProp(prop: Property<unknown>, rest: string[], callback: () => void, addSub: (sub: Subscription) => void): void
+    {
+        if (rest.length === 0)
+        {
+            addSub(prop.onChange.subscribe(callback));
+            return;
+        }
+
+        let nestedSubs: Subscription[] = [];
+
+        const resubscribeNested = (): void =>
+        {
+            for (const sub of nestedSubs)
+            {
+                sub.unsubscribe();
+            }
+            nestedSubs = [];
+
+            const currentValue: unknown = prop.getValue();
+            if (currentValue !== null && currentValue !== undefined)
+            {
+                this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
+                {
+                    nestedSubs.push(sub);
+                    addSub(sub);
+                });
+            }
+
+            callback();
+        };
+
+        addSub(prop.onChange.subscribe(resubscribeNested));
+
+        const currentValue: unknown = prop.getValue();
+        if (currentValue !== null && currentValue !== undefined)
+        {
+            this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
+            {
+                nestedSubs.push(sub);
+                addSub(sub);
+            });
+        }
+    }
+
     private __subscribeToNestedChain(obj: unknown, chain: string[], callback: () => void, addSub: (sub: Subscription) => void): void
     {
         if (chain.length === 0 || obj === null || obj === undefined) return;
@@ -519,47 +384,7 @@ export abstract class FluffBase extends HTMLElement
 
         if (prop instanceof Property)
         {
-            if (rest.length === 0)
-            {
-                addSub(prop.onChange.subscribe(callback));
-            }
-            else
-            {
-                let nestedSubs: Subscription[] = [];
-
-                const resubscribeNested = (): void =>
-                {
-                    for (const sub of nestedSubs)
-                    {
-                        sub.unsubscribe();
-                    }
-                    nestedSubs = [];
-
-                    const currentValue: unknown = prop.getValue();
-                    if (currentValue !== null && currentValue !== undefined)
-                    {
-                        this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
-                        {
-                            nestedSubs.push(sub);
-                            addSub(sub);
-                        });
-                    }
-
-                    callback();
-                };
-
-                addSub(prop.onChange.subscribe(resubscribeNested));
-
-                const currentValue: unknown = prop.getValue();
-                if (currentValue !== null && currentValue !== undefined)
-                {
-                    this.__subscribeToNestedChain(currentValue, rest, callback, (sub) =>
-                    {
-                        nestedSubs.push(sub);
-                        addSub(sub);
-                    });
-                }
-            }
+            this.__subscribeToProp(prop, rest, callback, addSub);
         }
         else if (rest.length > 0 && prop !== null && prop !== undefined)
         {
@@ -620,27 +445,32 @@ export abstract class FluffBase extends HTMLElement
         return value;
     }
 
-    private __applyPropertyBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void
+    // CompactBinding: [nameIdx, type, deps, exprId, extras?]
+    private __applyPropertyBindingWithScope(el: Element, binding: CompactBinding, scope: Scope, subscriptions?: Subscription[]): void
     {
+        const [nameIdx, , compactDeps, exprId, extras] = binding;
+        const name = FluffBase.__s[nameIdx];
+        const deps = FluffBase.__decodeDeps(compactDeps);
+
         const tagName = el.tagName.toLowerCase();
         const isCustomElement = customElements.get(tagName) !== undefined;
         const update = (): void =>
         {
             try
             {
-                if (typeof binding.e !== 'number')
+                if (typeof exprId !== 'number')
                 {
-                    throw new Error(`Binding for ${binding.n} is missing exprId`);
+                    throw new Error(`Binding for ${name} is missing exprId`);
                 }
-                const fn = this.__getCompiledExprFn(binding.e);
+                const fn = this.__getCompiledExprFn(exprId);
                 let value: unknown = fn(this, scope.locals);
 
-                if (binding.p && binding.p.length > 0)
+                if (extras?.p && extras.p.length > 0)
                 {
-                    value = this.__applyPipes(value, binding.p, scope.locals);
+                    value = this.__applyPipesForController(value, extras.p, scope.locals);
                 }
 
-                this.__setChildProperty(el, binding.n, value);
+                this.__setChildProperty(el, name, value);
             }
             catch(e)
             {
@@ -648,11 +478,11 @@ export abstract class FluffBase extends HTMLElement
             }
         };
 
-        this.__subscribeToExpressionInScope(binding.d, scope, update, subscriptions);
+        this.__subscribeToExpressionInScope(deps, scope, update, subscriptions);
 
-        if (binding.s)
+        if (extras?.s)
         {
-            this.__subscribeToExpressionInScope([binding.s], scope, update, subscriptions);
+            this.__subscribeToExpressionInScope([extras.s], scope, update, subscriptions);
         }
 
         if (isCustomElement)
@@ -671,7 +501,7 @@ export abstract class FluffBase extends HTMLElement
                     }
                     else
                     {
-                        console.warn(`Element <${tagName}> is not a FluffBase instance after whenDefined - binding for "${binding.n}" skipped`);
+                        console.warn(`Element <${tagName}> is not a FluffBase instance after whenDefined - binding for "${name}" skipped`);
                     }
                 });
             }
@@ -682,26 +512,30 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    private __applyEventBindingWithScope(el: Element, binding: BindingInfo, scope: Scope): void
+    // CompactBinding: [nameIdx, type, deps, handlerId, extras?]
+    private __applyEventBindingWithScope(el: Element, binding: CompactBinding, scope: Scope): void
     {
-        const boundKey = `__fluff_event_${binding.n}`;
+        const [nameIdx, , , handlerId] = binding;
+        const name = FluffBase.__s[nameIdx];
+
+        const boundKey = `__fluff_event_${name}`;
         if (Reflect.has(el, boundKey)) return;
         Reflect.set(el, boundKey, true);
 
-        if (typeof binding.h !== 'number')
+        if (typeof handlerId !== 'number')
         {
-            throw new Error(`Event binding for ${binding.n} is missing handlerId`);
+            throw new Error(`Event binding for ${name} is missing handlerId`);
         }
-        const handlerFn = this.__getCompiledHandlerFn(binding.h);
+        const handlerFn = this.__getCompiledHandlerFn(handlerId);
 
         const hasDirectives = el.hasAttribute('data-fluff-directives');
         if (el.hasAttribute('x-fluff-component') || hasDirectives)
         {
-            this.__applyOutputBinding(el, binding.n, handlerFn, scope);
+            this.__applyOutputBinding(el, name, handlerFn, scope);
         }
         else
         {
-            el.addEventListener(binding.n, (event: Event) =>
+            el.addEventListener(name, (event: Event) =>
             {
                 try
                 {
@@ -785,17 +619,20 @@ export abstract class FluffBase extends HTMLElement
     }
 
 
-    private __applyTwoWayBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void
+    // CompactBinding: [nameIdx, type, deps, exprId, extras?] — extras.t = targetProp for two-way
+    private __applyTwoWayBindingWithScope(el: Element, binding: CompactBinding, scope: Scope, subscriptions?: Subscription[]): void
     {
         this.__applyPropertyBindingWithScope(el, binding, scope, subscriptions);
 
-        if (typeof binding.t !== 'string' || binding.t.length === 0)
+        const name = FluffBase.__s[binding[0]];
+        const targetProp = binding[4]?.t;
+        if (typeof targetProp !== 'string' || targetProp.length === 0)
         {
-            throw new Error(`Two-way binding for ${binding.n} is missing targetProp`);
+            throw new Error(`Two-way binding for ${name} is missing targetProp`);
         }
-        const reactiveProp = this.__getReactivePropFromScope(binding.t, scope);
+        const reactiveProp = this.__getReactivePropFromScope(targetProp, scope);
 
-        const childPropCandidate = Reflect.get(el, binding.n);
+        const childPropCandidate = Reflect.get(el, name);
         if (reactiveProp && childPropCandidate instanceof Property)
         {
             const sub = childPropCandidate.onChange.subscribe((val) =>
@@ -813,25 +650,30 @@ export abstract class FluffBase extends HTMLElement
         }
     }
 
-    private __applyClassBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void
+    // CompactBinding: [nameIdx, type, deps, exprId]
+    private __applyClassBindingWithScope(el: Element, binding: CompactBinding, scope: Scope, subscriptions?: Subscription[]): void
     {
+        const [nameIdx, , compactDeps, exprId] = binding;
+        const name = FluffBase.__s[nameIdx];
+        const deps = FluffBase.__decodeDeps(compactDeps);
+
         const update = (): void =>
         {
             try
             {
-                if (typeof binding.e !== 'number')
+                if (typeof exprId !== 'number')
                 {
-                    throw new Error(`Class binding for ${binding.n} is missing exprId`);
+                    throw new Error(`Class binding for ${name} is missing exprId`);
                 }
-                const fn = this.__getCompiledExprFn(binding.e);
+                const fn = this.__getCompiledExprFn(exprId);
                 const value = this.__unwrap(fn(this, scope.locals));
                 if (value)
                 {
-                    el.classList.add(binding.n);
+                    el.classList.add(name);
                 }
                 else
                 {
-                    el.classList.remove(binding.n);
+                    el.classList.remove(name);
                 }
             }
             catch(e)
@@ -840,25 +682,30 @@ export abstract class FluffBase extends HTMLElement
             }
         };
 
-        this.__subscribeToExpressionInScope(binding.d, scope, update, subscriptions);
+        this.__subscribeToExpressionInScope(deps, scope, update, subscriptions);
         update();
     }
 
-    private __applyStyleBindingWithScope(el: Element, binding: BindingInfo, scope: Scope, subscriptions?: Subscription[]): void
+    // CompactBinding: [nameIdx, type, deps, exprId]
+    private __applyStyleBindingWithScope(el: Element, binding: CompactBinding, scope: Scope, subscriptions?: Subscription[]): void
     {
+        const [nameIdx, , compactDeps, exprId] = binding;
+        const name = FluffBase.__s[nameIdx];
+        const deps = FluffBase.__decodeDeps(compactDeps);
+
         const update = (): void =>
         {
             try
             {
-                if (typeof binding.e !== 'number')
+                if (typeof exprId !== 'number')
                 {
-                    throw new Error(`Style binding for ${binding.n} is missing exprId`);
+                    throw new Error(`Style binding for ${name} is missing exprId`);
                 }
-                const fn = this.__getCompiledExprFn(binding.e);
+                const fn = this.__getCompiledExprFn(exprId);
                 const value = this.__unwrap(fn(this, scope.locals));
                 if (this.__hasStyle(el))
                 {
-                    el.style.setProperty(binding.n, String(value));
+                    el.style.setProperty(name, String(value));
                 }
             }
             catch(e)
@@ -867,7 +714,7 @@ export abstract class FluffBase extends HTMLElement
             }
         };
 
-        this.__subscribeToExpressionInScope(binding.d, scope, update, subscriptions);
+        this.__subscribeToExpressionInScope(deps, scope, update, subscriptions);
         update();
     }
 
@@ -878,7 +725,7 @@ export abstract class FluffBase extends HTMLElement
 
     protected __createProp<T>(nameOrIdx: string | number, options: T | { initialValue: T; [key: string]: unknown }): Property<T>
     {
-        const name = typeof nameOrIdx === 'number' ? FluffBase.__decodeString(nameOrIdx) : nameOrIdx;
+        const name = typeof nameOrIdx === 'number' ? FluffBase.__s[nameOrIdx] : nameOrIdx;
         const prop = new Property<T>(options);
         Object.defineProperty(this, name, {
             get(): T | null

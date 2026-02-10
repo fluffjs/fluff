@@ -1,19 +1,10 @@
 import type { RenderContext } from '../interfaces/RenderContext.js';
-import type { Subscription } from '../interfaces/Subscription.js';
-import type { SwitchMarkerConfig } from '../interfaces/SwitchMarkerConfig.js';
+import { FluffBase, type CompactSwitchConfig } from './FluffBase.js';
 import { MarkerController } from './MarkerController.js';
 
-export class SwitchController extends MarkerController
+export class SwitchController extends MarkerController<CompactSwitchConfig>
 {
-    private readonly config: SwitchMarkerConfig;
     private templates: HTMLTemplateElement[] = [];
-    private readonly bindingsSubscriptions: Subscription[] = [];
-
-    public constructor(id: number, startMarker: Comment, endMarker: Comment | null, host: HTMLElement, shadowRoot: ShadowRoot, config: SwitchMarkerConfig)
-    {
-        super(id, startMarker, endMarker, host, shadowRoot);
-        this.config = config;
-    }
 
     public initialize(): void
     {
@@ -21,13 +12,15 @@ export class SwitchController extends MarkerController
         const templateIdPrefix = `${hostTag}-${this.id}-`;
         this.templates = Array.from(this.shadowRoot.querySelectorAll<HTMLTemplateElement>(`template[data-fluff-case^="${templateIdPrefix}"]`));
 
-        const deps = this.config.deps ?? [];
+        // CompactSwitchConfig: [3, exprId, deps, cases[]]  —  case = [isDefault, fallthrough, valueExprId]
+        const [, expressionExprId, compactDeps, cases] = this.config;
+        const deps = FluffBase.__decodeDeps(compactDeps) ?? [];
 
         const update = (): void =>
         {
             this.clearContentBetweenMarkersWithCleanup(this.bindingsSubscriptions);
 
-            const switchValue = this.evaluateExpr(this.config.expressionExprId);
+            const switchValue = this.evaluateExpr(expressionExprId);
             let matched = false;
             let shouldFallthrough = false;
 
@@ -35,22 +28,22 @@ export class SwitchController extends MarkerController
                 shouldBreak: false
             };
 
-            for (let i = 0; i < this.config.cases.length; i++)
+            for (let i = 0; i < cases.length; i++)
             {
                 if (renderContext.shouldBreak) break;
 
-                const caseInfo = this.config.cases[i];
+                const [isDefault, fallthrough, valueExprId] = cases[i];
                 const template = this.templates[i];
                 if (!template) continue;
 
-                const caseMatches = caseInfo.isDefault
-                    || (caseInfo.valueExprId !== undefined && this.evaluateExpr(caseInfo.valueExprId) === switchValue);
+                const caseMatches = isDefault
+                    || (valueExprId !== null && this.evaluateExpr(valueExprId) === switchValue);
 
                 if (shouldFallthrough || (!matched && caseMatches))
                 {
                     matched = true;
                     this.cloneAndInsertTemplate(template, this.loopContext, renderContext, this.bindingsSubscriptions);
-                    shouldFallthrough = caseInfo.fallthrough;
+                    shouldFallthrough = fallthrough;
                 }
             }
 

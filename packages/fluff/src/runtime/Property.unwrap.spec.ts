@@ -36,8 +36,10 @@ describe('Property unwrapping in bindings', () =>
             }
         ];
 
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('property', 'hostClass', 'childProp');
         Reflect.set(TestPropertyUnwrapParentComponent, '__bindings', {
-            l0: [{ n: 'property', b: 'property', d: [['hostClass', 'childProp']], e: 0 }]
+            l0: [[bi, 0, [[bi + 1, bi + 2]], 0]]
         });
 
         const childTag = 'test-prop-unwrap-child-' + Math.random()

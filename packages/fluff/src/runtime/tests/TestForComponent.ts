@@ -1,3 +1,4 @@
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -15,8 +16,10 @@ export class TestForComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('item', 'items');
         this.__setMarkerConfigs([
-            [0, { type: 'for', iterator: 'item', iterableExprId: 0, deps: ['items'], hasEmpty: false }]
+            [0, [1, si, 0, false, [si + 1], null]]
         ]);
     }
 

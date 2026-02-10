@@ -1,5 +1,5 @@
 import { Publisher } from '../../utils/Publisher.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -16,8 +16,10 @@ export class TestOutputBindingChildComponent extends FluffElement
     {
         this.__getShadowRoot().innerHTML = '<button data-lid="l0">Edit</button>';
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'click', b: 'event', h: 1, d: ['onEdit'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('click');
+        const bindings = {
+            l0: [[bi, 1, null, 1]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

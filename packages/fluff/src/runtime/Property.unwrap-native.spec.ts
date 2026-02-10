@@ -44,8 +44,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestClassBindingComponent = createClassBindingTestComponent();
 
+        const bi1 = FluffBase.__s.length;
+        FluffBase.__s.push('active', 'item', 'selected');
         Reflect.set(TestClassBindingComponent, '__bindings', {
-            l0: [{ n: 'active', b: 'class', d: [['item', 'selected']], e: 0 }]
+            l0: [[bi1, 3, [[bi1 + 1, bi1 + 2]], 0]]
         });
 
         const tag = 'test-class-unwrap-' + Math.random().toString(36).slice(2);
@@ -88,8 +90,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestStyleBindingComponent = createStyleBindingTestComponent();
 
+        const bi2 = FluffBase.__s.length;
+        FluffBase.__s.push('background-color', 'item', 'color');
         Reflect.set(TestStyleBindingComponent, '__bindings', {
-            l0: [{ n: 'background-color', b: 'style', d: [['item', 'color']], e: 0 }]
+            l0: [[bi2, 4, [[bi2 + 1, bi2 + 2]], 0]]
         });
 
         const tag = 'test-style-unwrap-' + Math.random().toString(36).slice(2);
@@ -135,8 +139,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestPropertyBindingComponent = createPropertyBindingTestComponent();
 
+        const bi3 = FluffBase.__s.length;
+        FluffBase.__s.push('disabled', 'item', 'disabled');
         Reflect.set(TestPropertyBindingComponent, '__bindings', {
-            l0: [{ n: 'disabled', b: 'property', d: [['item', 'disabled']], e: 0 }]
+            l0: [[bi3, 0, [[bi3 + 1, bi3 + 2]], 0]]
         });
 
         const tag = 'test-property-unwrap-' + Math.random().toString(36).slice(2);
@@ -182,8 +188,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestAttributeBindingComponent = createAttributeBindingTestComponent();
 
+        const bi4 = FluffBase.__s.length;
+        FluffBase.__s.push('data-value', 'item', 'value');
         Reflect.set(TestAttributeBindingComponent, '__bindings', {
-            l0: [{ n: 'data-value', b: 'property', d: [['item', 'value']], e: 0 }]
+            l0: [[bi4, 0, [[bi4 + 1, bi4 + 2]], 0]]
         });
 
         const tag = 'test-attribute-unwrap-' + Math.random().toString(36).slice(2);
@@ -226,8 +234,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestClassReactiveComponent = createClassBindingTestComponent();
 
+        const bi5 = FluffBase.__s.length;
+        FluffBase.__s.push('active', 'item', 'selected');
         Reflect.set(TestClassReactiveComponent, '__bindings', {
-            l0: [{ n: 'active', b: 'class', d: [['item', 'selected']], e: 0 }]
+            l0: [[bi5, 3, [[bi5 + 1, bi5 + 2]], 0]]
         });
 
         const tag = 'test-class-reactive-' + Math.random().toString(36).slice(2);
@@ -276,8 +286,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestStyleReactiveComponent = createStyleBindingTestComponent();
 
+        const bi6 = FluffBase.__s.length;
+        FluffBase.__s.push('background-color', 'item', 'color');
         Reflect.set(TestStyleReactiveComponent, '__bindings', {
-            l0: [{ n: 'background-color', b: 'style', d: [['item', 'color']], e: 0 }]
+            l0: [[bi6, 4, [[bi6 + 1, bi6 + 2]], 0]]
         });
 
         const tag = 'test-style-reactive-' + Math.random().toString(36).slice(2);
@@ -329,8 +341,10 @@ describe('Property unwrapping for native element bindings', () =>
 
         const TestPropertyReactiveComponent = createPropertyBindingTestComponent();
 
+        const bi7 = FluffBase.__s.length;
+        FluffBase.__s.push('disabled', 'item', 'disabled');
         Reflect.set(TestPropertyReactiveComponent, '__bindings', {
-            l0: [{ n: 'disabled', b: 'property', d: [['item', 'disabled']], e: 0 }]
+            l0: [[bi7, 0, [[bi7 + 1, bi7 + 2]], 0]]
         });
 
         const tag = 'test-property-reactive-' + Math.random().toString(36).slice(2);

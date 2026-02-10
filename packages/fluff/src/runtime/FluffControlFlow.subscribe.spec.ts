@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Property } from '../utils/Property.js';
+import { FluffBase } from './FluffBase.js';
 import { FluffElement } from './FluffElement.js';
 import { TestHarness } from './tests/TestHarness.js';
 
@@ -60,8 +61,10 @@ describe('binding.subscribe should trigger re-evaluation', () =>
                 throw new Error('Invalid type');
             }
         ], []);
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('tasks');
         HostComponent.__bindings = {
-            l0: [{ n: 'tasks', b: 'property', e: 0, s: 'filteredTasks' }]
+            l0: [[bi, 0, null, 0, { s: 'filteredTasks' }]]
         };
 
         TestHarness.defineCustomElement('test-subscribe-host', HostComponent);

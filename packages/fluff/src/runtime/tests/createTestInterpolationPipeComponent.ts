@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -41,8 +42,10 @@ export function createTestInterpolationPipeComponent(): TestInterpolationPipeCom
         protected override __render(): void
         {
             this.__getShadowRoot().innerHTML = '<span><!--fluff:text:0--><!--/fluff:text:0--></span>';
+            const si = FluffBase.__s.length;
+            FluffBase.__s.push('message', 'uppercase');
             this.__setMarkerConfigs([
-                [0, { type: 'text', exprId: 0, deps: ['message'], pipes: [{ name: 'uppercase', argExprIds: [] }] }]
+                [0, [2, 0, [si], [[si + 1, []]]]]
             ]);
         }
 

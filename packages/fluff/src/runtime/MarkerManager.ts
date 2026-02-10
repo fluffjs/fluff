@@ -1,18 +1,18 @@
-import type { MarkerConfig } from '../interfaces/MarkerConfig.js';
+import type { CompactMarkerConfig } from './FluffBase.js';
 import type { MarkerConfigEntries } from './MarkerManagerInterface.js';
 import { BreakController } from './BreakController.js';
-import { FluffBase } from './FluffBase.js';
 import { ForController } from './ForController.js';
 import { IfController } from './IfController.js';
-import { MarkerConfigGuards } from './MarkerConfigGuards.js';
 import type { MarkerController } from './MarkerController.js';
 import { SwitchController } from './SwitchController.js';
 import { TextController } from './TextController.js';
 
+const MARKER_TYPES = ['if', 'for', 'text', 'switch', 'break'] as const;
+
 export class MarkerManager
 {
     private readonly controllers = new Map<number, Map<Comment, MarkerController>>();
-    private readonly configs = new Map<number, MarkerConfig>();
+    private readonly configs = new Map<number, CompactMarkerConfig>();
     private readonly host: HTMLElement;
     private readonly shadowRoot: ShadowRoot;
 
@@ -22,46 +22,11 @@ export class MarkerManager
         this.shadowRoot = shadowRoot;
     }
 
-    private decodeConfig(config: MarkerConfig | unknown[]): MarkerConfig
-    {
-        if (this.isCompactMarkerConfig(config))
-        {
-            const decoded = FluffBase.__decodeMarkerConfig(config);
-            if (this.isMarkerConfig(decoded))
-            {
-                return decoded;
-            }
-            throw new Error('Decoded marker config is invalid');
-        }
-        if (!Array.isArray(config))
-        {
-            return config;
-        }
-        throw new Error('Invalid marker config format');
-    }
-
-    private isMarkerConfig(value: unknown): value is MarkerConfig
-    {
-        if (typeof value !== 'object' || value === null) return false;
-        if (!('type' in value)) return false;
-        const typeVal = (value as { type: unknown }).type;
-        return typeof typeVal === 'string' && ['if', 'for', 'text', 'switch', 'break'].includes(typeVal);
-    }
-
-    private isCompactMarkerConfig(config: MarkerConfig | unknown[]): config is Parameters<typeof FluffBase.__decodeMarkerConfig>[0]
-    {
-        if (!Array.isArray(config)) return false;
-        if (config.length === 0) return false;
-        const firstElement: unknown = config[0];
-        return typeof firstElement === 'number' && firstElement >= 0 && firstElement <= 4;
-    }
-
     public initializeFromConfig(entries: MarkerConfigEntries): void
     {
         this.configs.clear();
-        for (const [id, rawConfig] of entries)
+        for (const [id, config] of entries)
         {
-            const config = this.decodeConfig(rawConfig);
             this.configs.set(id, config);
         }
 
@@ -70,7 +35,7 @@ export class MarkerManager
             const config = this.configs.get(id);
             if (!config) continue;
 
-            const { startMarker, endMarker } = this.findMarkers(id, config.type);
+            const { startMarker, endMarker } = this.findMarkers(id, MARKER_TYPES[config[0]]);
             if (!startMarker)
             {
                 continue;
@@ -104,7 +69,7 @@ export class MarkerManager
         }
 
         const config = this.configs.get(id);
-        if (config?.type !== type)
+        if (!config || MARKER_TYPES[config[0]] !== type)
         {
             return undefined;
         }
@@ -205,28 +170,16 @@ export class MarkerManager
         return { startMarker, endMarker };
     }
 
-    private createController(id: number, startMarker: Comment, endMarker: Comment | null, config: MarkerConfig): MarkerController | null
+    private createController(id: number, startMarker: Comment, endMarker: Comment | null, config: CompactMarkerConfig): MarkerController | null
     {
-        if (MarkerConfigGuards.isIfConfig(config))
+        switch (config[0])
         {
-            return new IfController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            case 0: return new IfController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            case 1: return new ForController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            case 2: return new TextController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            case 3: return new SwitchController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            case 4: return new BreakController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
+            default: return null;
         }
-        if (MarkerConfigGuards.isForConfig(config))
-        {
-            return new ForController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
-        }
-        if (MarkerConfigGuards.isSwitchConfig(config))
-        {
-            return new SwitchController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
-        }
-        if (MarkerConfigGuards.isTextConfig(config))
-        {
-            return new TextController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
-        }
-        if (MarkerConfigGuards.isBreakConfig(config))
-        {
-            return new BreakController(id, startMarker, endMarker, this.host, this.shadowRoot, config);
-        }
-        return null;
     }
 }

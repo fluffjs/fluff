@@ -1,5 +1,5 @@
 import { Property } from '../../utils/Property.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { MarkerManager } from '../MarkerManager.js';
 import { TestUnsubscribeNestedParentBaseComponent } from './TestUnsubscribeNestedParentBaseComponent.js';
 
@@ -30,12 +30,16 @@ export class TestForUnsubscribeNestedParentComponent extends TestUnsubscribeNest
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('item', 'items');
         this.__setMarkerConfigs([
-            [0, { type: 'for', iterator: 'item', iterableExprId: 0, deps: ['items'], hasEmpty: true }]
+            [0, [1, si, 0, true, [si + 1], null]]
         ]);
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'stats', b: 'property', e: 1, d: ['stats'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('stats');
+        const bindings = {
+            l0: [[bi, 0, [bi], 1]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

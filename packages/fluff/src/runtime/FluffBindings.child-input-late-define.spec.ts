@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FluffBase } from './FluffBase.js';
 import { TestChildTasksListComponent } from './tests/TestChildTasksListComponent.js';
 import { TestParentBindsTasksComponent } from './tests/TestParentBindsTasksComponent.js';
 import { TestHarness } from './tests/TestHarness.js';
@@ -57,8 +58,10 @@ describe('bindings (child input late define)', () =>
 
     it('should render child for-loop items when parent binds tasks after child is defined', async() =>
     {
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('tasks');
         TestParentBindsTasksComponent.__bindings = {
-            l0: [{ n: 'tasks', b: 'property', e: 1 }]
+            l0: [[bi, 0, null, 1]]
         };
 
         TestHarness.defineCustomElement('test-parent-binds-tasks', TestParentBindsTasksComponent);

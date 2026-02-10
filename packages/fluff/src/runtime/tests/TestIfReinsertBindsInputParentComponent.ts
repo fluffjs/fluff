@@ -1,5 +1,5 @@
 import { Property } from '../../utils/Property.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 import type { TaskStats } from './TaskStats.js';
@@ -54,12 +54,16 @@ export class TestIfReinsertBindsInputParentComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('show');
         this.__setMarkerConfigs([
-            [0, { type: 'if', branches: [{ exprId: 0, deps: ['show'] }] }]
+            [0, [0, [[0, [si]]]]]
         ]);
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'stats', b: 'property', e: 1, d: ['stats'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('stats');
+        const bindings = {
+            l0: [[bi, 0, [bi], 1]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

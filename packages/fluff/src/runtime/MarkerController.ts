@@ -2,7 +2,7 @@ import type { FluffHostElement } from '../interfaces/FluffHostElement.js';
 import type { PropertyChain } from '../interfaces/PropertyChain.js';
 import type { RenderContext } from '../interfaces/RenderContext.js';
 import type { Subscription } from '../interfaces/Subscription.js';
-import { FluffBase } from './FluffBase.js';
+import { FluffBase, type CompactMarkerConfig } from './FluffBase.js';
 import { FluffElement } from './FluffElement.js';
 import { registerScope, type Scope } from './ScopeRegistry.js';
 
@@ -15,16 +15,17 @@ interface MarkerManagerLike
     cleanupController?: (id: number, startMarker?: Comment) => void;
 }
 
-export abstract class MarkerController
+export abstract class MarkerController<TConfig extends CompactMarkerConfig = CompactMarkerConfig>
 {
     protected readonly subscriptions: Subscription[] = [];
+    protected readonly bindingsSubscriptions: Subscription[] = [];
     protected readonly host: FluffHostElement;
     protected readonly shadowRoot: ShadowRoot;
     protected parentScope: Scope | undefined;
     protected loopContext: Record<string, unknown> = {};
     protected markerManager: MarkerManagerLike | undefined;
 
-    protected constructor(protected readonly id: number, protected readonly startMarker: Comment, protected readonly endMarker: Comment | null, host: FluffHostElement, shadowRoot: ShadowRoot)
+    public constructor(protected readonly id: number, protected readonly startMarker: Comment, protected readonly endMarker: Comment | null, host: FluffHostElement, shadowRoot: ShadowRoot, protected readonly config: TConfig)
     {
         this.host = host;
         this.shadowRoot = shadowRoot;

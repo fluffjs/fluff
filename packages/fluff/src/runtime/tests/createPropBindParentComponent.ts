@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 
 interface ParentComponentInstance extends FluffElement
@@ -27,8 +28,10 @@ export function createPropBindParentComponent(childTag: string): ParentComponent
         }
     }
 
+    const bi = FluffBase.__s.length;
+    FluffBase.__s.push('theProp');
     ParentComponent.__bindings = {
-        l0: [{ n: 'theProp', b: 'property', e: 0, d: [] }]
+        l0: [[bi, 0, null, 0]]
     };
 
     return ParentComponent as ParentComponentConstructor;

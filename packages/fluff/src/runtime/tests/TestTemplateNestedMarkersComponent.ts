@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -40,9 +41,11 @@ export class TestTemplateNestedMarkersComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('show', 'text');
         this.__setMarkerConfigs([
-            [0, { type: 'if', branches: [{ exprId: 0, deps: ['show'] }, { exprId: undefined, deps: [] }] }],
-            [1, { type: 'text', exprId: 1, deps: ['text'], pipes: [] }]
+            [0, [0, [[0, [si]], []]]],
+            [1, [2, 1, [si + 1], null]]
         ]);
     }
 

@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 import type { TaskStats } from './TaskStats.js';
@@ -38,8 +39,10 @@ export class TestIfReinsertBindsInputChildComponent extends FluffElement
                     <div class="total"><!--fluff:text:0--><!--/fluff:text:0--></div>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('stats');
         this.__setMarkerConfigs([
-            [0, { type: 'text', exprId: 2, deps: ['stats'], pipes: [] }]
+            [0, [2, 2, [si], null]]
         ]);
     }
 

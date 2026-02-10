@@ -1,4 +1,4 @@
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 
 export class DirectOutputParent extends FluffElement
@@ -14,8 +14,10 @@ export class DirectOutputParent extends FluffElement
     {
         this.__getShadowRoot().innerHTML = '<direct-output-child x-fluff-component data-lid="l0"></direct-output-child>';
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'submit', b: 'event', h: 0, d: ['onSubmit'] }]
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('submit');
+        const bindings = {
+            l0: [[si, 1, null, 0] as const]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

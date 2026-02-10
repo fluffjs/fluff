@@ -1,3 +1,4 @@
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -16,8 +17,10 @@ export class TestParentBindsTasksComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('child', 'childList');
         this.__setMarkerConfigs([
-            [0, { type: 'for', iterator: 'child', iterableExprId: 0, deps: ['childList'], hasEmpty: false }]
+            [0, [1, si, 0, false, [si + 1], null]]
         ]);
     }
 

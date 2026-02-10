@@ -77,8 +77,10 @@ function createSelectWithForComponent(tagName: string): SelectTestComponentConst
                 </template>
             `;
 
+            const si = FluffBase.__s.length;
+            FluffBase.__s.push('opt', 'options');
             this.__setMarkerConfigs([
-                [0, { type: 'for', iterator: 'opt', iterableExprId: 0, deps: ['options'], hasEmpty: false }]
+                [0, [1, si, 0, false, [si + 1], null]]
             ]);
         }
 
@@ -89,11 +91,13 @@ function createSelectWithForComponent(tagName: string): SelectTestComponentConst
         }
     }
 
+    const bi = FluffBase.__s.length;
+    FluffBase.__s.push('value', 'selectedValue', 'textContent');
     SelectWithForComponent.__bindings = {
-        l0: [{ n: 'value', b: 'property', e: 1, d: ['selectedValue'] }],
+        l0: [[bi, 0, [bi + 1], 1]],
         l1: [
-            { n: 'value', b: 'property', e: 2, d: [] },
-            { n: 'textContent', b: 'property', e: 3, d: [] }
+            [bi, 0, null, 2],
+            [bi + 2, 0, null, 3]
         ]
     };
 

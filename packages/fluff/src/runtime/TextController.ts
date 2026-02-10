@@ -1,28 +1,23 @@
-import type { TextMarkerConfig } from '../interfaces/TextMarkerConfig.js';
+import { FluffBase, type CompactTextConfig } from './FluffBase.js';
 import { MarkerController } from './MarkerController.js';
 
-export class TextController extends MarkerController
+export class TextController extends MarkerController<CompactTextConfig>
 {
-    private readonly config: TextMarkerConfig;
     private textNode: Text | null = null;
-
-    public constructor(id: number, startMarker: Comment, endMarker: Comment | null, host: HTMLElement, shadowRoot: ShadowRoot, config: TextMarkerConfig)
-    {
-        super(id, startMarker, endMarker, host, shadowRoot);
-        this.config = config;
-    }
 
     public initialize(): void
     {
         this.textNode = document.createTextNode('');
         this.insertBeforeEndMarker(this.textNode);
 
-        const deps = this.config.deps ?? [];
-        const pipes = this.config.pipes ?? [];
+        // CompactTextConfig: [2, exprId, deps, pipes]  —  pipes = [pipeNameIdx, argExprIds[]][]
+        const [, exprId, compactDeps, compactPipes] = this.config;
+        const deps = FluffBase.__decodeDeps(compactDeps) ?? [];
+        const pipes = compactPipes ?? [];
 
         const update = (): void =>
         {
-            let result = this.evaluateExpr(this.config.exprId);
+            let result = this.evaluateExpr(exprId);
 
             if (this.host.__applyPipesForController)
             {

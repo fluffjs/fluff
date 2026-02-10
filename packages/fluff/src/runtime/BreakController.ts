@@ -1,14 +1,9 @@
-import type { BreakMarkerConfig } from '../interfaces/BreakMarkerConfig.js';
+import type { CompactBreakConfig } from './FluffBase.js';
 import type { RenderContext } from '../interfaces/RenderContext.js';
 import { MarkerController } from './MarkerController.js';
 
-export class BreakController extends MarkerController
+export class BreakController extends MarkerController<CompactBreakConfig>
 {
-    public constructor(id: number, startMarker: Comment, endMarker: Comment | null, host: HTMLElement, shadowRoot: ShadowRoot, _config: BreakMarkerConfig)
-    {
-        super(id, startMarker, endMarker, host, shadowRoot);
-    }
-
     public initialize(): void
     {
     }

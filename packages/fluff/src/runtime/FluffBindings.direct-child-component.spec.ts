@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FluffBase } from './FluffBase.js';
 import { TestDirectChildComponent } from './tests/TestDirectChildComponent.js';
 import { TestDirectParentComponent } from './tests/TestDirectParentComponent.js';
 import { hasItemName } from './tests/typeguards.js';
@@ -27,8 +28,10 @@ describe('bindings on direct custom element children', () =>
 
     it('should apply parent bindings to direct custom element children', async() =>
     {
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('value', 'itemName');
         Reflect.set(TestDirectParentComponent, '__bindings', {
-            l0: [{ n: 'value', b: 'property', d: ['itemName'], e: 0 }]
+            l0: [[bi, 0, [bi + 1], 0]]
         });
 
         const parentTag = 'test-direct-parent-' + Math.random()

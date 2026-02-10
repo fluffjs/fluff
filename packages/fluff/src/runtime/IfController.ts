@@ -1,20 +1,11 @@
-import type { IfMarkerConfig } from '../interfaces/IfMarkerConfig.js';
 import type { PropertyChain } from '../interfaces/PropertyChain.js';
-import type { Subscription } from '../interfaces/Subscription.js';
+import { FluffBase, type CompactIfConfig } from './FluffBase.js';
 import { MarkerController } from './MarkerController.js';
 
-export class IfController extends MarkerController
+export class IfController extends MarkerController<CompactIfConfig>
 {
-    private readonly config: IfMarkerConfig;
     private templates: HTMLTemplateElement[] = [];
     private currentBranchIndex = -1;
-    private readonly bindingsSubscriptions: Subscription[] = [];
-
-    public constructor(id: number, startMarker: Comment, endMarker: Comment | null, host: HTMLElement, shadowRoot: ShadowRoot, config: IfMarkerConfig)
-    {
-        super(id, startMarker, endMarker, host, shadowRoot);
-        this.config = config;
-    }
 
     public initialize(): void
     {
@@ -22,12 +13,16 @@ export class IfController extends MarkerController
         const templateIdPrefix = `${hostTag}-${this.id}-`;
         this.templates = Array.from(this.shadowRoot.querySelectorAll<HTMLTemplateElement>(`template[data-fluff-branch^="${templateIdPrefix}"]`));
 
+        // CompactIfConfig: [0, branches[]]  —  branch = [exprId?, deps?] or [] for else
+        const [, branches] = this.config;
+
         const allDeps: PropertyChain[] = [];
-        for (const branch of this.config.branches)
+        for (const branch of branches)
         {
-            if (branch.deps)
+            if (branch.length > 1 && branch[1])
             {
-                allDeps.push(...branch.deps);
+                const decoded = FluffBase.__decodeDeps(branch[1]);
+                if (decoded) allDeps.push(...decoded);
             }
         }
 
@@ -35,15 +30,15 @@ export class IfController extends MarkerController
         {
             let matchedIndex = -1;
 
-            for (let i = 0; i < this.config.branches.length; i++)
+            for (let i = 0; i < branches.length; i++)
             {
-                const branch = this.config.branches[i];
-                if (branch.exprId === undefined)
+                const branch = branches[i];
+                if (branch.length === 0 || branch[0] === null)
                 {
                     matchedIndex = i;
                     break;
                 }
-                const result = this.evaluateExpr(branch.exprId);
+                const result = this.evaluateExpr(branch[0]);
                 if (result)
                 {
                     matchedIndex = i;

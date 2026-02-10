@@ -1,5 +1,5 @@
 import { Property } from '../../utils/Property.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -36,12 +36,16 @@ export class TestOutputBindingParentComponent extends FluffElement
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('show');
         this.__setMarkerConfigs([
-            [0, { type: 'if', branches: [{ exprId: 0, deps: ['show'] }] }]
+            [0, [0, [[0, [si]]]]]
         ]);
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'edit', b: 'event', h: 0, d: ['onChildEdit'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('edit');
+        const bindings = {
+            l0: [[bi, 1, null, 0]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

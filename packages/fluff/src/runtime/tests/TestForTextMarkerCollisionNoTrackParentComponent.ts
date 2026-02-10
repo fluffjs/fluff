@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -26,9 +27,11 @@ export class TestForTextMarkerCollisionNoTrackParentComponent extends FluffEleme
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('tag', 'tags');
         this.__setMarkerConfigs([
-            [0, { type: 'for', iterator: 'tag', iterableExprId: 0, deps: ['tags'], hasEmpty: false }],
-            [9, { type: 'text', exprId: 1, deps: ['tag'] }]
+            [0, [1, si, 0, false, [si + 1], null]],
+            [9, [2, 1, [si], null]]
         ]);
     }
 

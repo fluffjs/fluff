@@ -1,4 +1,5 @@
 import { Property } from '../../utils/Property.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElement.js';
 import { MarkerManager } from '../MarkerManager.js';
 
@@ -27,8 +28,10 @@ export class TestGetterReactivityComponent extends FluffElement
                     <div class="count"><!--fluff:text:0--><!--/fluff:text:0--></div>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('items');
         this.__setMarkerConfigs([
-            [0, { type: 'text', exprId: 0, deps: ['items'], pipes: [] }]
+            [0, [2, 0, [si], null]]
         ]);
     }
 

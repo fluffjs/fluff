@@ -1,5 +1,5 @@
 import { Property } from '../../utils/Property.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { FluffElement } from '../FluffElementImpl.js';
 import type { TaskStats } from './TaskStats.js';
 
@@ -46,8 +46,10 @@ export class TestUnsubscribeNestedChildComponent extends FluffElement
                     <test-unsubscribe-nested-grandchild x-fluff-component data-lid="l0"></test-unsubscribe-nested-grandchild>
                 `;
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'stats', b: 'property', e: 4, d: ['stats'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('stats');
+        const bindings = {
+            l0: [[bi, 0, [bi], 4]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);

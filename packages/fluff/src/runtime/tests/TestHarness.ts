@@ -2,14 +2,14 @@ import { FluffBase, type ExpressionFn, type HandlerFn } from '../FluffBase.js';
 
 export class TestHarness
 {
-    public static setExpressionTable(expressions: ExpressionFn[], handlers: HandlerFn[]): void
+    public static setExpressionTable(expressions: ExpressionFn[], handlers: HandlerFn[], strings?: string[]): void
     {
-        FluffBase.__setExpressionTable(expressions, handlers);
+        FluffBase.__setExpressionTable(expressions, handlers, strings);
     }
 
     public static resetExpressionTable(): void
     {
-        FluffBase.__setExpressionTable([], []);
+        FluffBase.__setExpressionTable([], [], []);
     }
 
     public static defineCustomElement(tag: string, ctor: CustomElementConstructor): void

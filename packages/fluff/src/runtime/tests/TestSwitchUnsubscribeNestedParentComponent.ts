@@ -1,5 +1,5 @@
 import { Property } from '../../utils/Property.js';
-import type { BindingInfo } from '../FluffBase.js';
+import { FluffBase } from '../FluffBase.js';
 import { MarkerManager } from '../MarkerManager.js';
 import { TestUnsubscribeNestedParentBaseComponent } from './TestUnsubscribeNestedParentBaseComponent.js';
 
@@ -30,19 +30,16 @@ export class TestSwitchUnsubscribeNestedParentComponent extends TestUnsubscribeN
                     </template>
                 `;
 
+        const si = FluffBase.__s.length;
+        FluffBase.__s.push('mode');
         this.__setMarkerConfigs([
-            [
-                0, {
-                type: 'switch', expressionExprId: 0, deps: ['mode'], cases: [
-                    { valueExprId: 1, isDefault: false, fallthrough: false },
-                    { valueExprId: 2, isDefault: false, fallthrough: false }
-                ]
-            }
-            ]
+            [0, [3, 0, [si], [[false, false, 1], [false, false, 2]]]]
         ]);
 
-        const bindings: Record<string, BindingInfo[]> = {
-            l0: [{ n: 'stats', b: 'property', e: 3, d: ['stats'] }]
+        const bi = FluffBase.__s.length;
+        FluffBase.__s.push('stats');
+        const bindings = {
+            l0: [[bi, 0, [bi], 3]]
         };
 
         Reflect.set(this.constructor, '__bindings', bindings);
