@@ -1,0 +1,24 @@
+{
+    "name": "fluff-router-subpath-demo",
+    "$schema": "../../node_modules/nx/schemas/project-schema.json",
+    "projectType": "application",
+    "sourceRoot": "apps/fluff-router-subpath-demo/src",
+    "tags": [],
+    "targets": {
+        "build": {
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "npm run cli -- --cwd apps/fluff-router-subpath-demo build"
+            },
+            "outputs": [
+                "{projectRoot}/dist"
+            ]
+        },
+        "serve": {
+            "executor": "nx:run-commands",
+            "options": {
+                "command": "npm run cli -- --cwd apps/fluff-router-subpath-demo serve"
+            }
+        }
+    }
+}

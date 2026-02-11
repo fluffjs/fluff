@@ -530,6 +530,64 @@ describe('DomPreProcessor serialization behavior', () =>
     });
 });
 
+describe('DomPreProcessor void element handling', () =>
+{
+    it('should treat void elements without self-closing slash as self-closing', async() =>
+    {
+        const processor = new DomPreProcessor();
+        const html = '<input type="text"><div id="sibling">content</div>';
+        const result = await processor.process(html);
+
+        expect(result)
+            .toContain('<div id="sibling">');
+        expect(result)
+            .toContain('content');
+    });
+
+    it('should preserve siblings after void element with self-closing slash', async() =>
+    {
+        const processor = new DomPreProcessor();
+        const html = '<input type="text" /><div id="sibling">content</div>';
+        const result = await processor.process(html);
+
+        expect(result)
+            .toContain('<div id="sibling">');
+        expect(result)
+            .toContain('content');
+    });
+
+    it('should preserve siblings after void element that went through parse5 round-trip', async() =>
+    {
+        const parse5 = await import('parse5');
+        const original = '<input type="text" [value]="name" /><div id="result">{{ name }}</div>';
+        const fragment = parse5.parseFragment(original);
+        const normalized = parse5.serialize(fragment);
+
+        const processor = new DomPreProcessor();
+        const result = await processor.process(normalized);
+
+        expect(result)
+            .toContain('<div id="result">');
+        expect(result)
+            .toContain('x-fluff-text');
+    });
+
+    it('should handle all HTML5 void elements without self-closing slash', async() =>
+    {
+        const voidElements = ['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr'];
+
+        for (const tag of voidElements)
+        {
+            const processor = new DomPreProcessor();
+            const html = `<${tag}><div id="after">after</div>`;
+            const result = await processor.process(html);
+
+            expect(result, `void element <${tag}> should not consume siblings`)
+                .toContain('<div id="after">after</div>');
+        }
+    });
+});
+
 describe('Template Refs (#ref syntax)', () =>
 {
     describe('DomPreProcessor', () =>

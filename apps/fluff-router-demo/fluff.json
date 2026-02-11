@@ -1,0 +1,31 @@
+{
+    "version": "1.0",
+    "targets": {
+        "app": {
+            "name": "fluff-router-demo",
+            "srcDir": "src",
+            "outDir": "dist",
+            "entryPoint": "main.ts",
+            "indexHtml": "index.html",
+            "assets": [],
+            "bundle": {
+                "minify": false,
+                "gzip": false,
+                "target": "es2022"
+            },
+            "serve": {
+                "port": 4401,
+                "host": "localhost"
+            }
+        }
+    },
+    "defaultTarget": "app",
+    "plugins": [
+        "@fluffjs/router"
+    ],
+    "pluginConfig": {
+        "@fluffjs/router": {
+            "basePath": "/"
+        }
+    }
+}

@@ -8,7 +8,11 @@
       <project name="angular-demo-app-e2e" file="file://$PROJECT_DIR$/apps/angular-demo-app-e2e/project.json" />
       <project name="fluff-e2e" file="file://$PROJECT_DIR$/e2e-fluff/project.json" />
       <project name="fluff-hello-world" file="file://$PROJECT_DIR$/apps/fluff-hello-world/project.json" />
+      <project name="fluff-router-demo" file="file://$PROJECT_DIR$/apps/fluff-router-demo/project.json" />
+      <project name="fluff-router-subpath-demo" file="file://$PROJECT_DIR$/apps/fluff-router-subpath-demo/project.json" />
       <project name="nx-e2e" file="file://$PROJECT_DIR$/e2e-nx/project.json" />
+      <project name="router-e2e" file="file://$PROJECT_DIR$/e2e-router/project.json" />
+      <project name="router-subpath-e2e" file="file://$PROJECT_DIR$/e2e-router-subpath/project.json" />
     </projects>
   </component>
 </project>

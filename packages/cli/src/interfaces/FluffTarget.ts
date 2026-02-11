@@ -12,6 +12,7 @@ export interface FluffTarget
     exclude?: string[];
     indexHtml?: string;
     styles?: string[];
+    globalStyles?: string[];
     assets?: string[];
     bundle?: BundleOptions;
     serve?: ServeOptions;

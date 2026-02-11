@@ -1,0 +1,31 @@
+{
+    "name": "router-subpath-e2e",
+    "$schema": "../node_modules/nx/schemas/project-schema.json",
+    "projectType": "application",
+    "implicitDependencies": [
+        "@fluffjs/router",
+        "@fluffjs/cli"
+    ],
+    "targets": {
+        "playwright-install": {
+            "command": "npx playwright install",
+            "options": {
+                "cwd": "e2e-router-subpath"
+            }
+        },
+        "build": {
+            "dependsOn": ["@fluffjs/router:build-internal"],
+            "command": "npm run cli -- --cwd apps/fluff-router-subpath-demo build && cp e2e-router-subpath/fixtures/root-index.html apps/fluff-router-subpath-demo/dist/index.html && cp e2e-router-subpath/fixtures/serve.json apps/fluff-router-subpath-demo/dist/serve.json",
+            "options": {
+                "cwd": "."
+            }
+        },
+        "e2e": {
+            "dependsOn": ["playwright-install", "build"],
+            "command": "npx playwright test --config=playwright.config.ts",
+            "options": {
+                "cwd": "e2e-router-subpath"
+            }
+        }
+    }
+}

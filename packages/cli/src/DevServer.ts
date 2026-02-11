@@ -1,6 +1,9 @@
 import httpProxy from 'http-proxy';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
+import * as path from 'node:path';
+import type { WebSocket } from 'ws';
+import { WebSocketServer } from 'ws';
 
 export interface ProxyConfigEntry
 {
@@ -14,31 +17,60 @@ export interface DevServerOptions
 {
     port: number;
     host: string;
-    esbuildPort: number;
-    esbuildHost: string;
+    outDir: string;
     proxyConfig?: ProxyConfig;
 }
+
+const MIME_TYPES: Readonly<Record<string, string>> = {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.mjs': 'application/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.map': 'application/json; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.eot': 'application/vnd.ms-fontobject',
+    '.otf': 'font/otf',
+    '.wasm': 'application/wasm',
+    '.txt': 'text/plain; charset=utf-8',
+    '.xml': 'application/xml; charset=utf-8'
+};
 
 export class DevServer
 {
     private readonly options: DevServerOptions;
-    private readonly proxy: httpProxy;
+    private proxy: httpProxy | null = null;
     private server: http.Server | null = null;
+    private wss: WebSocketServer | null = null;
+    private readonly wsClients = new Set<WebSocket>();
 
     public constructor(options: DevServerOptions)
     {
         this.options = options;
-        this.proxy = httpProxy.createProxyServer({});
 
-        this.proxy.on('error', (err, req, res) =>
+        if (options.proxyConfig)
         {
-            console.error('Proxy error:', err.message);
-            if (res instanceof http.ServerResponse && !res.headersSent)
+            this.proxy = httpProxy.createProxyServer({});
+
+            this.proxy.on('error', (err, req, res) =>
             {
-                res.writeHead(502, { 'Content-Type': 'text/plain' });
-                res.end('Proxy error: ' + err.message);
-            }
-        });
+                console.error('Proxy error:', err.message);
+                if (res instanceof http.ServerResponse && !res.headersSent)
+                {
+                    res.writeHead(502, { 'Content-Type': 'text/plain' });
+                    res.end('Proxy error: ' + err.message);
+                }
+            });
+        }
     }
 
     public static loadProxyConfig(configPath: string): ProxyConfig | undefined
@@ -79,10 +111,9 @@ export class DevServer
 
     private static isProxyEntry(value: unknown): value is { target: string; changeOrigin?: boolean }
     {
-        return typeof value === 'object' &&
-            value !== null &&
-            'target' in value &&
-            typeof (value as { target: unknown }).target === 'string';
+        return typeof value === 'object' && value !== null && 'target' in value && typeof (value as {
+            target: unknown
+        }).target === 'string';
     }
 
     public async start(): Promise<number>
@@ -94,12 +125,33 @@ export class DevServer
                 this.handleRequest(req, res);
             });
 
+            this.wss = new WebSocketServer({ noServer: true });
+
+            this.server.on('upgrade', (req, socket, head) =>
+            {
+                if (req.url === '/_fluff/ws')
+                {
+                    this.wss?.handleUpgrade(req, socket, head, (ws) =>
+                    {
+                        this.wsClients.add(ws);
+                        ws.on('close', () =>
+                        {
+                            this.wsClients.delete(ws);
+                        });
+                    });
+                }
+                else
+                {
+                    socket.destroy();
+                }
+            });
+
             this.server.on('error', (err) =>
             {
                 reject(err);
             });
 
-            this.server.listen(this.options.port, () =>
+            this.server.listen(this.options.port, this.options.host, () =>
             {
                 const address = this.server?.address();
                 const port = typeof address === 'object' && address ? address.port : this.options.port;
@@ -108,14 +160,33 @@ export class DevServer
         });
     }
 
+    public notifyReload(): void
+    {
+        const message = JSON.stringify({ type: 'reload' });
+        for (const client of this.wsClients)
+        {
+            client.send(message);
+        }
+    }
+
     public stop(): void
     {
+        if (this.wss)
+        {
+            this.wss.close();
+            this.wss = null;
+        }
+        this.wsClients.clear();
         if (this.server)
         {
             this.server.close();
             this.server = null;
         }
-        this.proxy.close();
+        if (this.proxy)
+        {
+            this.proxy.close();
+            this.proxy = null;
+        }
     }
 
     private handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void
@@ -130,7 +201,15 @@ export class DevServer
         }
         else
         {
-            this.forwardToEsbuild(req, res);
+            this.serveStatic(res, pathname).catch((err: unknown) =>
+            {
+                console.error('Static serve error:', err);
+                if (!res.headersSent)
+                {
+                    res.writeHead(500, { 'Content-Type': 'text/plain' });
+                    res.end('Internal Server Error');
+                }
+            });
         }
     }
 
@@ -154,20 +233,46 @@ export class DevServer
 
     private proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, entry: ProxyConfigEntry): void
     {
+        if (!this.proxy)
+        {
+            res.writeHead(502, { 'Content-Type': 'text/plain' });
+            res.end('Proxy not configured');
+            return;
+        }
+
         const options: httpProxy.ServerOptions = {
-            target: entry.target,
-            changeOrigin: entry.changeOrigin ?? false
+            target: entry.target, changeOrigin: entry.changeOrigin ?? false
         };
 
         this.proxy.web(req, res, options);
     }
 
-    private forwardToEsbuild(req: http.IncomingMessage, res: http.ServerResponse): void
+    private async serveStatic(res: http.ServerResponse, pathname: string): Promise<void>
     {
-        const options: httpProxy.ServerOptions = {
-            target: `http://${this.options.esbuildHost}:${this.options.esbuildPort}`
-        };
+        const hasExtension = /\.\w+$/.test(pathname);
+        const resolvedPath = hasExtension ? path.resolve(this.options.outDir, pathname.replace(/^\/+/, '')) : path.resolve(this.options.outDir, 'index.html');
+        const resolvedOutDir = path.resolve(this.options.outDir);
 
-        this.proxy.web(req, res, options);
+        if (!resolvedPath.startsWith(resolvedOutDir + path.sep))
+        {
+            res.writeHead(403, { 'Content-Type': 'text/plain' });
+            res.end('403 - Forbidden');
+            return;
+        }
+
+        if (!fs.existsSync(resolvedPath))
+        {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('404 - Not Found');
+            return;
+        }
+
+        const ext = path.extname(resolvedPath)
+            .toLowerCase();
+        const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
+
+        const content = await fs.promises.readFile(resolvedPath);
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(content);
     }
 }

@@ -31,6 +31,9 @@
             ],
             "@fluffjs/cli": [
                 "packages/cli/src/index.ts"
+            ],
+            "@fluffjs/router": [
+                "packages/router/src/index.ts"
             ]
         }
     }

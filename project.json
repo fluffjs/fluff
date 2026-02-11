@@ -8,7 +8,8 @@
                 "commands": [
                     "nx build @fluffjs/cli",
                     "nx build @fluffjs/fluff",
-                    "nx build @fluffjs/nx"
+                    "nx build @fluffjs/nx",
+                    "nx build @fluffjs/router"
                 ],
                 "parallel": false
             }

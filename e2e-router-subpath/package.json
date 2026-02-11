@@ -1,0 +1,12 @@
+{
+    "name": "@fluffjs/router-subpath-e2e",
+    "version": "1.0.0",
+    "private": true,
+    "dependencies": {
+        "@fluffjs/fluff": "workspace:*",
+        "@fluffjs/router": "workspace:*"
+    },
+    "devDependencies": {
+        "@fluffjs/cli": "workspace:*"
+    }
+}

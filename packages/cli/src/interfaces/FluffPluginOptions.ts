@@ -1,3 +1,5 @@
+import type { PluginManager } from '../PluginManager.js';
+
 export interface FluffPluginOptions
 {
     srcDir: string;
@@ -6,4 +8,6 @@ export interface FluffPluginOptions
     sourcemap?: boolean;
     skipDefine?: boolean;
     production?: boolean;
+    pluginManager?: PluginManager;
+    globalStylesCss?: string;
 }

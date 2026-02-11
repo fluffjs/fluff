@@ -1,0 +1,12 @@
+<div class="page">
+    <h1>🏠 Home</h1>
+    <p>Welcome to the Fluff Router Demo!</p>
+    <nav>
+        <a href="/about">About</a>
+        <a href="/users/42">User 42</a>
+        <a href="/users/99?tab=settings#profile">User 99 (with query &amp; fragment)</a>
+        <a href="/projects/10/overview">Project 10</a>
+        <a href="/nowhere">404 Page</a>
+        <a [routerLink]="aboutRoute" id="router-link-about">About (routerLink)</a>
+    </nav>
+</div>

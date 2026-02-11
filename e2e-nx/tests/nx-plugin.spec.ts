@@ -81,7 +81,25 @@ test.describe('@fluffjs/nx plugin e2e', () =>
             { cwd: workspaceDir }
         );
 
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise<void>((resolve, reject) =>
+        {
+            const timeout = setTimeout(() =>
+            {
+                reject(new Error('Dev server did not start within 60 seconds'));
+            }, 60000);
+
+            const onData = (chunk: Buffer | string): void =>
+            {
+                if (String(chunk).includes('Server running'))
+                {
+                    clearTimeout(timeout);
+                    serveProcess?.stdout?.off('data', onData);
+                    resolve();
+                }
+            };
+
+            serveProcess?.stdout?.on('data', onData);
+        });
 
         await page.goto(`http://localhost:${TEST_PORT}`);
 

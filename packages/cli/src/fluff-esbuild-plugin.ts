@@ -1,9 +1,9 @@
+import { parse } from '@babel/parser';
+import * as t from '@babel/types';
 import type { Plugin } from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { parse } from '@babel/parser';
-import * as t from '@babel/types';
 import { generate } from './BabelHelpers.js';
 import { CodeGenerator } from './CodeGenerator.js';
 import { ComponentCompiler } from './ComponentCompiler.js';
@@ -67,8 +67,7 @@ function detectDecorators(source: string): FileDecorators
     try
     {
         const ast = parse(source, {
-            sourceType: 'module',
-            plugins: ['typescript', 'decorators']
+            sourceType: 'module', plugins: ['typescript', 'decorators']
         });
 
         for (const node of ast.program.body)
@@ -127,11 +126,16 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
     const fluffSrcPath = findFluffSourcePath();
     const compiledCache = new Map<string, CachedCompileResult>();
     let entryPointPath: string | null = null;
+    const { pluginManager } = options;
+
+    if (pluginManager)
+    {
+        compiler.setPluginManager(pluginManager);
+    }
 
     // noinspection JSUnusedGlobalSymbols
     return {
-        name: 'fluff',
-        setup(build): void
+        name: 'fluff', setup(build): void
         {
             entryPointPath = getEntryPointPath(build);
 
@@ -142,19 +146,29 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
 
                 const componentPaths = await compiler.discoverComponents(options.srcDir);
 
+                if (pluginManager?.hasPlugins)
+                {
+                    await pluginManager.runAfterDiscovery({
+                        components: componentPaths.flatMap(p =>
+                        {
+                            const metadata = compiler.getComponentMetadata(p);
+                            return metadata ? [{ filePath: p, metadata }] : [];
+                        }),
+                        directives: compiler.getDirectivePaths()
+                            .flatMap(p =>
+                            {
+                                const metadata = compiler.getDirectiveMetadata(p);
+                                return metadata ? [{ filePath: p, metadata }] : [];
+                            })
+                    });
+                }
+
                 for (const componentPath of componentPaths)
                 {
-                    const result = await compiler.compileComponentForBundle(
-                        componentPath,
-                        options.minify,
-                        options.sourcemap,
-                        options.skipDefine,
-                        options.production
-                    );
+                    const result = await compiler.compileComponentForBundle(componentPath, options.minify, options.sourcemap, options.skipDefine, options.production);
 
                     compiledCache.set(componentPath, {
-                        code: result.code,
-                        watchFiles: result.watchFiles
+                        code: result.code, watchFiles: result.watchFiles
                     });
                 }
             });
@@ -177,13 +191,7 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                         };
                     }
 
-                    const result = await compiler.compileComponentForBundle(
-                        args.path,
-                        options.minify,
-                        options.sourcemap,
-                        options.skipDefine,
-                        options.production
-                    );
+                    const result = await compiler.compileComponentForBundle(args.path, options.minify, options.sourcemap, options.skipDefine, options.production);
                     return {
                         contents: result.code,
                         loader: 'js',
@@ -194,15 +202,9 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
 
                 if (decorators.hasDirective)
                 {
-                    const result = await compiler.compileDirectiveForBundle(
-                        args.path,
-                        options.sourcemap,
-                        options.production
-                    );
+                    const result = await compiler.compileDirectiveForBundle(args.path, options.sourcemap, options.production);
                     return {
-                        contents: result.code,
-                        loader: 'js',
-                        resolveDir: path.dirname(args.path)
+                        contents: result.code, loader: 'js', resolveDir: path.dirname(args.path)
                     };
                 }
 
@@ -211,9 +213,7 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                     const transformed = await compiler.transformPipeDecorators(source, args.path);
                     DecoratorValidator.validate(transformed, args.path);
                     return {
-                        contents: transformed,
-                        loader: 'ts',
-                        resolveDir: path.dirname(args.path)
+                        contents: transformed, loader: 'ts', resolveDir: path.dirname(args.path)
                     };
                 }
 
@@ -223,22 +223,16 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                 }
 
                 const ast = parse(source, {
-                    sourceType: 'module',
-                    plugins: ['typescript', 'decorators']
+                    sourceType: 'module', plugins: ['typescript', 'decorators']
                 });
 
-                const exprTableImport = t.importDeclaration(
-                    [],
-                    t.stringLiteral(VIRTUAL_EXPR_TABLE_ID)
-                );
+                const exprTableImport = t.importDeclaration([], t.stringLiteral(VIRTUAL_EXPR_TABLE_ID));
 
                 ast.program.body.unshift(exprTableImport);
 
                 const output = generate(ast, { compact: false });
                 return {
-                    contents: output.code,
-                    loader: 'ts',
-                    resolveDir: path.dirname(args.path)
+                    contents: output.code, loader: 'ts', resolveDir: path.dirname(args.path)
                 };
             });
 
@@ -247,15 +241,44 @@ export function fluffPlugin(options: FluffPluginOptions): Plugin
                 return { path: VIRTUAL_EXPR_TABLE_ID, namespace: 'fluff-virtual' };
             });
 
-            build.onLoad({ filter: /.*/, namespace: 'fluff-virtual' }, () =>
+            build.onLoad({ filter: /.*/, namespace: 'fluff-virtual' }, async() =>
             {
                 const directivePaths = compiler.getDirectivePaths();
-                const directiveImports = directivePaths.map(p => `import '${p}';`).join('\n');
-                const exprTable = CodeGenerator.generateGlobalExprTable();
+                const directiveImports = directivePaths.map(p => `import '${p}';`)
+                    .join('\n');
+                const exprTable = CodeGenerator.generateGlobalExprTable(pluginManager);
+
+                let runtimeImports = '';
+                if (pluginManager?.hasPlugins)
+                {
+                    const imports = pluginManager.collectRuntimeImports();
+                    runtimeImports = imports.map(imp => `import '${imp}';`)
+                        .join('\n');
+                }
+
+                let globalStylesCode = '';
+                if (options.globalStylesCss)
+                {
+                    const escapedCss = options.globalStylesCss.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
+                    globalStylesCode = 'import { FluffElement } from \'@fluffjs/fluff\';\n' +
+                        'const __fluffGlobalSheet = new CSSStyleSheet();\n' +
+                        `__fluffGlobalSheet.replaceSync(\`${escapedCss}\`);\n` +
+                        'FluffElement.__addGlobalStyleSheet(__fluffGlobalSheet);\n';
+                }
+
+                let entryContent = directiveImports + '\n' + runtimeImports + '\n' + globalStylesCode + (exprTable || '');
+
+                if (pluginManager?.hasPlugins)
+                {
+                    const entryAst = parse(entryContent, { sourceType: 'module' });
+                    await pluginManager.runModifyEntryPoint({
+                        program: entryAst.program, srcDir: options.srcDir
+                    });
+                    entryContent = generate(entryAst, { compact: false }).code;
+                }
+
                 return {
-                    contents: directiveImports + '\n' + (exprTable || ''),
-                    loader: 'js',
-                    resolveDir: options.srcDir
+                    contents: entryContent, loader: 'js', resolveDir: options.srcDir
                 };
             });
 

@@ -6,9 +6,9 @@ import cssnano from 'cssnano';
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import { minify as minifyHtml } from 'html-minifier-terser';
-import postcss from 'postcss';
 import * as parse5 from 'parse5';
 import * as path from 'path';
+import postcss from 'postcss';
 import { SourceMapConsumer, SourceMapGenerator } from 'source-map';
 import type { ClassTransformOptions } from './babel-plugin-class-transform.js';
 import classTransformPlugin from './babel-plugin-class-transform.js';
@@ -26,6 +26,7 @@ import { ErrorHelpers } from './ErrorHelpers.js';
 import { GetterDependencyExtractor } from './GetterDependencyExtractor.js';
 import type { CompileResult } from './interfaces/CompileResult.js';
 import { Parse5Helpers } from './Parse5Helpers.js';
+import type { PluginManager } from './PluginManager.js';
 import { TemplateParser } from './TemplateParser.js';
 
 interface BabelTransformOptions
@@ -43,69 +44,26 @@ export class ComponentCompiler
     private readonly componentSelectors = new Set<string>();
     private readonly directiveSelectors = new Set<string>();
     private readonly directivePaths: string[] = [];
+    private pluginManager: PluginManager | null = null;
 
-    private getReactivePropsForFile(filePath: string): Set<string>
+    public setPluginManager(manager: PluginManager): void
     {
-        const direct = reactivePropertiesMap.get(filePath);
-        if (direct)
-        {
-            return direct;
-        }
-
-        for (const [key, value] of reactivePropertiesMap.entries())
-        {
-            if (key === filePath || key.endsWith(filePath) || filePath.endsWith(key))
-            {
-                return value;
-            }
-        }
-
-        return new Set<string>();
-    }
-
-    protected createTemplateParser(_filePath: string): TemplateParser
-    {
-        return new TemplateParser();
-    }
-
-    private async runBabelTransform(code: string, filePath: string, options: BabelTransformOptions): Promise<string>
-    {
-        try
-        {
-            const presets: PluginItem[] = options.useTypeScriptPreset
-                ? [['@babel/preset-typescript', { isTSX: false, allExtensions: true }]]
-                : [];
-
-            const plugins: PluginItem[] = options.useDecoratorSyntax
-                ? [['@babel/plugin-syntax-decorators', { version: '2023-11' }], ...options.plugins]
-                : options.plugins;
-
-            const parserOpts = options.useDecoratorSyntax
-                ? { plugins: ['typescript', 'decorators'] as babel.ParserOptions['plugins'] }
-                : options.useTypeScriptPreset
-                    ? { plugins: ['typescript'] as babel.ParserOptions['plugins'] }
-                    : undefined;
-
-            const result = await babel.transformAsync(code, {
-                filename: filePath,
-                presets,
-                plugins,
-                parserOpts,
-                cwd: path.dirname(new URL(import.meta.url).pathname)
-            });
-
-            return result?.code ?? code;
-        }
-        catch(e)
-        {
-            console.error(`${options.errorContext} in ${filePath}:`, ErrorHelpers.getErrorMessage(e));
-            return code;
-        }
+        this.pluginManager = manager;
     }
 
     public getDirectivePaths(): string[]
     {
         return [...this.directivePaths];
+    }
+
+    public getComponentMetadata(filePath: string): ComponentMetadata | null
+    {
+        return componentMetadataMap.get(filePath) ?? null;
+    }
+
+    public getDirectiveMetadata(filePath: string): DirectiveMetadata | null
+    {
+        return directiveMetadataMap.get(filePath) ?? null;
     }
 
     public async discoverComponents(dir: string): Promise<string[]>
@@ -195,7 +153,8 @@ export class ComponentCompiler
 
         if (minify && styles)
         {
-            const nanoResult = await postcss([cssnano({ preset: 'default' })]).process(styles, { from: undefined });
+            const nanoResult = await postcss([cssnano({ preset: 'default' })])
+                .process(styles, { from: undefined });
             styles = nanoResult.css;
             const cssResult = await esbuild.transform(styles, {
                 loader: 'css', minify: true
@@ -207,8 +166,26 @@ export class ComponentCompiler
         const getterDepMap = GetterDependencyExtractor.extractGetterDependencyMap(source, reactiveProps);
         parser.setGetterDependencyMap(getterDepMap);
 
+        if (this.pluginManager?.hasHook('registerScopeElements'))
+        {
+            parser.setScopeElements(this.pluginManager.collectScopeElements());
+        }
+
+        if (this.pluginManager?.hasHook('beforeTemplatePreProcess'))
+        {
+            const preProcessFragment = parse5.parseFragment(templateHtml);
+            await this.pluginManager.runBeforeTemplatePreProcess(preProcessFragment, selector);
+            templateHtml = parse5.serialize(preProcessFragment);
+        }
+
         const parsed = await parser.parse(templateHtml);
         parser.setGetterDependencyMap(new Map());
+
+        if (this.pluginManager?.hasHook('afterTemplateParse'))
+        {
+            await this.pluginManager.runAfterTemplateParse(parsed, selector);
+        }
+
         const gen = new CodeGenerator(this.componentSelectors, selector, this.directiveSelectors);
         let generatedHtml = gen.generateHtml(parsed);
 
@@ -226,11 +203,34 @@ export class ComponentCompiler
             });
         }
 
+        if (this.pluginManager?.hasHook('afterCodeGeneration'))
+        {
+            const rootFragment = gen.getRootFragment();
+            if (rootFragment)
+            {
+                await this.pluginManager.runAfterCodeGeneration({
+                    componentSelector: selector,
+                    generatedFragment: rootFragment,
+                    markerConfigs: gen.getMarkerConfigsRef(),
+                    bindingsMap: gen.getBindingsMapRef()
+                });
+            }
+        }
+
         const markerConfigExpr = gen.getMarkerConfigExpression();
 
         const renderMethod = gen.generateRenderMethodFromHtml(generatedHtml, styles, markerConfigExpr);
 
         let result = await this.transformImportsForBundle(source, filePath);
+
+        if (this.pluginManager?.hasHook('beforeClassTransform'))
+        {
+            const classAst = parse(result, { sourceType: 'module', plugins: ['typescript', 'decorators'] });
+            await this.pluginManager.runBeforeClassTransform({
+                ast: classAst, filePath, metadata
+            });
+            result = generate(classAst, { compact: false }).code;
+        }
 
         result = await this.transformClass(result, filePath, {
             className, originalSuperClass: 'HTMLElement', newSuperClass: 'FluffElement', injectMethods: [
@@ -369,7 +369,10 @@ export class ComponentCompiler
         }
     }
 
-    public async extractDirectiveMetadata(code: string, filePath: string): Promise<{ metadata: DirectiveMetadata; transformedCode: string } | null>
+    public async extractDirectiveMetadata(code: string, filePath: string): Promise<{
+        metadata: DirectiveMetadata;
+        transformedCode: string
+    } | null>
     {
         try
         {
@@ -431,46 +434,6 @@ export class ComponentCompiler
         return { code: tsResult.code };
     }
 
-    private addDirectiveRegistration(code: string, selector: string, className: string): string
-    {
-        const ast = parse(code, { sourceType: 'module' });
-
-        const tagName = 'x-fluff-dir-' + className.toLowerCase().replace(/directive$/, '');
-        const defineCall = t.expressionStatement(
-            t.callExpression(
-                t.memberExpression(t.identifier('customElements'), t.identifier('define')),
-                [t.stringLiteral(tagName), t.identifier(className)]
-            )
-        );
-        ast.program.body.push(defineCall);
-
-        const registerCall = t.expressionStatement(
-            t.callExpression(
-                t.identifier('__registerDirective'),
-                [t.stringLiteral(selector), t.identifier(className)]
-            )
-        );
-        ast.program.body.push(registerCall);
-
-        return generate(ast, { compact: false }).code;
-    }
-
-    private addFluffDirectiveImport(code: string): string
-    {
-        const ast = parse(code, { sourceType: 'module', plugins: ['typescript', 'decorators'] });
-
-        const importSpecifiers = [
-            t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase')),
-            t.importSpecifier(t.identifier('FluffDirective'), t.identifier('FluffDirective')),
-            t.importSpecifier(t.identifier('__registerDirective'), t.identifier('__registerDirective'))
-        ];
-        const importDecl = t.importDeclaration(importSpecifiers, t.stringLiteral('@fluffjs/fluff'));
-
-        ast.program.body.unshift(importDecl);
-
-        return generate(ast, { compact: false }).code;
-    }
-
     public async transformClass(code: string, filePath: string, options: ClassTransformOptions): Promise<string>
     {
         return this.runBabelTransform(code, filePath, {
@@ -495,6 +458,105 @@ export class ComponentCompiler
             plugins: [[importsPlugin, importOptions]],
             errorContext: 'Failed to transform library imports'
         });
+    }
+
+    protected createTemplateParser(_filePath: string): TemplateParser
+    {
+        return new TemplateParser();
+    }
+
+    private getReactivePropsForFile(filePath: string): Set<string>
+    {
+        const direct = reactivePropertiesMap.get(filePath);
+        if (direct)
+        {
+            return direct;
+        }
+
+        for (const [key, value] of reactivePropertiesMap.entries())
+        {
+            if (key === filePath || key.endsWith(filePath) || filePath.endsWith(key))
+            {
+                return value;
+            }
+        }
+
+        return new Set<string>();
+    }
+
+    private async runBabelTransform(code: string, filePath: string, options: BabelTransformOptions): Promise<string>
+    {
+        try
+        {
+            const presets: PluginItem[] = options.useTypeScriptPreset ? [
+                [
+                    '@babel/preset-typescript',
+                    { isTSX: false, allExtensions: true }
+                ]
+            ] : [];
+
+            const plugins: PluginItem[] = options.useDecoratorSyntax ? [
+                [
+                    '@babel/plugin-syntax-decorators',
+                    { version: '2023-11' }
+                ], ...options.plugins
+            ] : options.plugins;
+
+            const parserOpts = options.useDecoratorSyntax ? {
+                plugins: [
+                    'typescript',
+                    'decorators'
+                ] as babel.ParserOptions['plugins']
+            } : options.useTypeScriptPreset ? { plugins: ['typescript'] as babel.ParserOptions['plugins'] } : undefined;
+
+            const result = await babel.transformAsync(code, {
+                filename: filePath, presets, plugins, parserOpts, cwd: path.dirname(new URL(import.meta.url).pathname)
+            });
+
+            return result?.code ?? code;
+        }
+        catch(e)
+        {
+            console.error(`${options.errorContext} in ${filePath}:`, ErrorHelpers.getErrorMessage(e));
+            return code;
+        }
+    }
+
+    private addDirectiveRegistration(code: string, selector: string, className: string): string
+    {
+        const ast = parse(code, { sourceType: 'module' });
+
+        const tagName = 'x-fluff-dir-' + className.toLowerCase()
+            .replace(/directive$/, '');
+        const defineCall = t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('customElements'), t.identifier('define')), [
+            t.stringLiteral(tagName),
+            t.identifier(className)
+        ]));
+        ast.program.body.push(defineCall);
+
+        const registerCall = t.expressionStatement(t.callExpression(t.identifier('__registerDirective'), [
+            t.stringLiteral(selector),
+            t.identifier(className)
+        ]));
+        ast.program.body.push(registerCall);
+
+        return generate(ast, { compact: false }).code;
+    }
+
+    private addFluffDirectiveImport(code: string): string
+    {
+        const ast = parse(code, { sourceType: 'module', plugins: ['typescript', 'decorators'] });
+
+        const importSpecifiers = [
+            t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase')),
+            t.importSpecifier(t.identifier('FluffDirective'), t.identifier('FluffDirective')),
+            t.importSpecifier(t.identifier('__registerDirective'), t.identifier('__registerDirective'))
+        ];
+        const importDecl = t.importDeclaration(importSpecifiers, t.stringLiteral('@fluffjs/fluff'));
+
+        ast.program.body.unshift(importDecl);
+
+        return generate(ast, { compact: false }).code;
     }
 
     private async createComponentSourceMap(code: string, esbuildMap: string, componentPath: string, templatePath: string, stylePath: string | null): Promise<string>
@@ -556,13 +618,7 @@ export class ComponentCompiler
             return code;
         }
 
-        const assignment = t.expressionStatement(
-            t.assignmentExpression(
-                '=',
-                t.memberExpression(t.identifier(className), t.identifier('__bindings')),
-                valueStmt.expression
-            )
-        );
+        const assignment = t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.identifier(className), t.identifier('__bindings')), valueStmt.expression));
         ast.program.body.push(assignment);
 
         return generate(ast, { compact: false }).code;
@@ -572,12 +628,10 @@ export class ComponentCompiler
     {
         const ast = parse(code, { sourceType: 'module' });
 
-        const defineCall = t.expressionStatement(
-            t.callExpression(
-                t.memberExpression(t.identifier('customElements'), t.identifier('define')),
-                [t.stringLiteral(selector), t.identifier(className)]
-            )
-        );
+        const defineCall = t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('customElements'), t.identifier('define')), [
+            t.stringLiteral(selector),
+            t.identifier(className)
+        ]));
         ast.program.body.push(defineCall);
 
         return generate(ast, { compact: false }).code;

@@ -14,6 +14,20 @@ import { Typeguards } from './Typeguards.js';
 
 const RESTRICTED_ELEMENTS = ['select', 'table', 'tbody', 'thead', 'tfoot', 'tr', 'td', 'th', 'colgroup'];
 
+const voidElementCache = new Map<string, boolean>();
+
+function isVoidElement(tagName: string): boolean
+{
+    let cached = voidElementCache.get(tagName);
+    if (cached === undefined)
+    {
+        const fragment = parse5.parseFragment(`<${tagName} />`);
+        cached = parse5.serialize(fragment) === `<${tagName}>`;
+        voidElementCache.set(tagName, cached);
+    }
+    return cached;
+}
+
 type ControlFlowFrame =
     | { type: 'if'; condition: string }
     | { type: 'else-if'; condition: string }
@@ -154,7 +168,7 @@ export class DomPreProcessor
         const el = Parse5Helpers.createElement(tagName, attrs);
         this.appendNode(el);
 
-        if (!token.selfClosing)
+        if (!token.selfClosing && !isVoidElement(tagName))
         {
             this.elementStack.push(el);
         }
@@ -237,18 +251,11 @@ export class DomPreProcessor
         return null;
     }
 
-    private buildBindingObject(
-        name: string,
-        binding: string,
-        value: string,
-        subscribeTo: string | undefined
-    ): Record<string, unknown>
+    private buildBindingObject(name: string, binding: string, value: string, subscribeTo: string | undefined): Record<string, unknown>
     {
         const parsed = ExpressionTransformer.parsePrimaryExpression(value);
         const bindingObj: Record<string, unknown> = {
-            name,
-            binding,
-            expression: parsed.expression
+            name, binding, expression: parsed.expression
         };
         if (parsed.pipes.length > 0)
         {
@@ -455,9 +462,7 @@ export class DomPreProcessor
             throw new Error('Internal error: parse5 root fragment not initialized');
         }
 
-        const parent: Parse5ParentNode = this.elementStack.length > 0
-            ? this.elementStack[this.elementStack.length - 1]
-            : this.rootFragment;
+        const parent: Parse5ParentNode = this.elementStack.length > 0 ? this.elementStack[this.elementStack.length - 1] : this.rootFragment;
 
         node.parentNode = parent;
         parent.childNodes.push(node);
@@ -468,9 +473,7 @@ export class DomPreProcessor
         if (value.length === 0) return;
 
         const textNode: parse5.DefaultTreeAdapterMap['textNode'] = {
-            nodeName: '#text',
-            value,
-            parentNode: null
+            nodeName: '#text', value, parentNode: null
         };
         this.appendNode(textNode);
     }
@@ -483,11 +486,7 @@ export class DomPreProcessor
         }
 
         const doctypeNode: parse5.DefaultTreeAdapterMap['documentType'] = {
-            nodeName: '#documentType',
-            name,
-            publicId: '',
-            systemId: '',
-            parentNode: null
+            nodeName: '#documentType', name, publicId: '', systemId: '', parentNode: null
         };
 
         doctypeNode.parentNode = this.rootFragment;
@@ -587,11 +586,10 @@ export class DomPreProcessor
         return null;
     }
 
-    private parseExpressionBlockCore(
-        text: string,
-        startPos: number,
-        keywordLength: number
-    ): { expression: string; bracePos: number } | null
+    private parseExpressionBlockCore(text: string, startPos: number, keywordLength: number): {
+        expression: string;
+        bracePos: number
+    } | null
     {
         const afterKeyword = startPos + 1 + keywordLength;
         const parenStart = this.skipWhitespace(text, afterKeyword);
@@ -674,10 +672,7 @@ export class DomPreProcessor
         this.stack.push({ type: 'else' });
 
         return {
-            tagName: 'x-fluff-else',
-            attrs: [],
-            endPos: bracePos + 1,
-            opensBlock: true
+            tagName: 'x-fluff-else', attrs: [], endPos: bracePos + 1, opensBlock: true
         };
     }
 
@@ -712,8 +707,7 @@ export class DomPreProcessor
         this.stack.push({ type: 'for', iterator: result.iterator, iterable: result.iterable, trackBy: result.trackBy });
 
         const attrs: { name: string; value: string }[] = [
-            { name: 'x-fluff-iterator', value: result.iterator },
-            { name: 'x-fluff-iterable', value: result.iterable }
+            { name: 'x-fluff-iterator', value: result.iterator }, { name: 'x-fluff-iterable', value: result.iterable }
         ];
         if (result.trackBy)
         {
@@ -721,10 +715,7 @@ export class DomPreProcessor
         }
 
         return {
-            tagName: 'x-fluff-for',
-            attrs,
-            endPos: bracePos + 1,
-            opensBlock: true
+            tagName: 'x-fluff-for', attrs, endPos: bracePos + 1, opensBlock: true
         };
     }
 
@@ -766,10 +757,7 @@ export class DomPreProcessor
         this.stack.push({ type: 'default' });
 
         return {
-            tagName: 'x-fluff-default',
-            attrs: [],
-            endPos: bracePos + 1,
-            opensBlock: true
+            tagName: 'x-fluff-default', attrs: [], endPos: bracePos + 1, opensBlock: true
         };
     }
 
@@ -781,20 +769,14 @@ export class DomPreProcessor
         this.stack.push({ type: 'empty' });
 
         return {
-            tagName: 'x-fluff-empty',
-            attrs: [],
-            endPos: bracePos + 1,
-            opensBlock: true
+            tagName: 'x-fluff-empty', attrs: [], endPos: bracePos + 1, opensBlock: true
         };
     }
 
     private parseSimpleStatement(startPos: number, keywordLength: number, tagName: string): ControlFlowParseResult
     {
         return {
-            tagName,
-            attrs: [],
-            endPos: startPos + 1 + keywordLength,
-            opensBlock: false
+            tagName, attrs: [], endPos: startPos + 1 + keywordLength, opensBlock: false
         };
     }
 
@@ -875,9 +857,7 @@ export class DomPreProcessor
     private handleComment(token: Comment): void
     {
         const commentNode: parse5.DefaultTreeAdapterMap['commentNode'] = {
-            nodeName: '#comment',
-            data: token.text,
-            parentNode: null
+            nodeName: '#comment', data: token.text, parentNode: null
         };
         this.appendNode(commentNode);
     }

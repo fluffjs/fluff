@@ -11,28 +11,21 @@ export type { HtmlTransformOptions } from './interfaces/HtmlTransformOptions.js'
 export class IndexHtmlTransformer
 {
     private static readonly LIVE_RELOAD_SCRIPT = `(function() {
-    let firstEvent = true;
-    const es = new EventSource('/esbuild');
-    es.addEventListener('change', e => {
-        if (firstEvent) {
-            firstEvent = false;
-            return;
-        }
-        const { added, removed, updated } = JSON.parse(e.data);
-        if (!added.length && !removed.length && updated.length === 1) {
-            for (const link of document.getElementsByTagName("link")) {
-                const url = new URL(link.href);
-                if (url.host === location.host && url.pathname === updated[0]) {
-                    const next = link.cloneNode();
-                    next.href = updated[0] + '?' + Math.random().toString(36).slice(2);
-                    next.onload = () => link.remove();
-                    link.parentNode.insertBefore(next, link.nextSibling);
-                    return;
-                }
+    var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var url = protocol + '//' + location.host + '/_fluff/ws';
+    function connect() {
+        var ws = new WebSocket(url);
+        ws.onmessage = function(e) {
+            var data = JSON.parse(e.data);
+            if (data.type === 'reload') {
+                location.reload();
             }
-        }
-        location.reload();
-    });
+        };
+        ws.onclose = function() {
+            setTimeout(connect, 1000);
+        };
+    }
+    connect();
 })();`;
 
     public static async transform(html: string, options: HtmlTransformOptions): Promise<string>
@@ -40,9 +33,7 @@ export class IndexHtmlTransformer
         const doc = parse5.parse(html);
 
         const jsSrc = options.gzScriptTag ? `${options.jsBundle}.gz` : options.jsBundle;
-        const cssSrc = options.cssBundle
-            ? (options.gzScriptTag ? `${options.cssBundle}.gz` : options.cssBundle)
-            : null;
+        const cssSrc = options.cssBundle ? (options.gzScriptTag ? `${options.cssBundle}.gz` : options.cssBundle) : null;
 
         const head = Parse5Helpers.findElement(doc, 'head');
         const body = Parse5Helpers.findElement(doc, 'body');
@@ -57,8 +48,7 @@ export class IndexHtmlTransformer
         if (head && cssSrc)
         {
             const linkEl = Parse5Helpers.createElement('link', [
-                { name: 'rel', value: 'stylesheet' },
-                { name: 'href', value: cssSrc }
+                { name: 'rel', value: 'stylesheet' }, { name: 'href', value: cssSrc }
             ]);
             Parse5Helpers.appendChild(head, linkEl);
         }
@@ -66,8 +56,7 @@ export class IndexHtmlTransformer
         if (body)
         {
             const scriptEl = Parse5Helpers.createElement('script', [
-                { name: 'type', value: 'module' },
-                { name: 'src', value: jsSrc }
+                { name: 'type', value: 'module' }, { name: 'src', value: jsSrc }
             ]);
             Parse5Helpers.appendChild(body, scriptEl);
         }
@@ -82,6 +71,11 @@ export class IndexHtmlTransformer
         if (options.liveReload)
         {
             IndexHtmlTransformer.decodeScriptTextNodes(doc);
+        }
+
+        if (options.pluginManager?.hasHook('modifyIndexHtml'))
+        {
+            await options.pluginManager.runModifyIndexHtml(doc);
         }
 
         let result = parse5.serialize(doc);

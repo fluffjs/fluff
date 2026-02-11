@@ -16,6 +16,7 @@ import type { Scope } from './interfaces/Scope.js';
 import type { SwitchCase } from './interfaces/SwitchCase.js';
 import type { SwitchNode } from './interfaces/SwitchNode.js';
 import type { TemplateNode } from './interfaces/TemplateNode.js';
+import type { ScopeElementConfig } from './interfaces/ScopeElementConfig.js';
 import type { Parse5Element, Parse5Node } from './Typeguards.js';
 import { Typeguards } from './Typeguards.js';
 
@@ -42,11 +43,17 @@ export class TemplateParser
     private templateRefs = new Set<string>();
     private scopeStack: Scope[] = [];
     private getterDependencyMap = new Map<string, string[]>();
+    private scopeElements: readonly ScopeElementConfig[] = [];
     private testYieldBeforeGetterDepsLookup: (() => Promise<void>) | null = null;
 
     public setGetterDependencyMap(map: Map<string, string[]>): void
     {
         this.getterDependencyMap = map;
+    }
+
+    public setScopeElements(configs: readonly ScopeElementConfig[]): void
+    {
+        this.scopeElements = configs;
     }
 
     public __setTestYieldBeforeGetterDepsLookup(callback: (() => Promise<void>) | null): void
@@ -299,7 +306,82 @@ export class TemplateParser
             return this.processTextElement(element);
         }
 
+        const scopeConfig = this.findScopeElementConfig(element);
+        if (scopeConfig)
+        {
+            return this.processScopedElement(element, scopeConfig);
+        }
+
         return this.processRegularElement(element);
+    }
+
+    private findScopeElementConfig(element: Parse5Element): ScopeElementConfig | null
+    {
+        for (const config of this.scopeElements)
+        {
+            if (element.tagName === config.tagName && this.getAttr(element, config.letAttribute) !== null)
+            {
+                return config;
+            }
+        }
+        return null;
+    }
+
+    private async processScopedElement(element: Parse5Element, config: ScopeElementConfig): Promise<ElementNode>
+    {
+        const scopeVariable = this.getAttr(element, config.letAttribute) ?? '';
+
+        const bindings: BindingInfo[] = [];
+        const attributes: Record<string, string> = {};
+        let hasBindings = false;
+
+        for (const attr of element.attrs)
+        {
+            if (attr.name === config.letAttribute)
+            {
+                continue;
+            }
+            if (attr.name.startsWith('x-fluff-attrib-'))
+            {
+                const bindingInfo = await this.parseBindingAttribute(attr.value);
+                if (bindingInfo)
+                {
+                    bindings.push(bindingInfo);
+                    hasBindings = true;
+
+                    if (bindingInfo.binding === 'ref')
+                    {
+                        this.templateRefs.add(bindingInfo.name);
+                    }
+                }
+            }
+            else
+            {
+                attributes[attr.name] = attr.value;
+            }
+        }
+
+        this.pushScope(scopeVariable.split(',').map(v => v.trim()).filter(v => v.length > 0));
+
+        const children = await this.processNodes(element.childNodes ?? []);
+
+        this.popScope();
+
+        const node: ElementNode = {
+            type: 'element',
+            tagName: element.tagName,
+            attributes,
+            bindings,
+            children,
+            namespaceURI: element.namespaceURI
+        };
+
+        if (hasBindings)
+        {
+            node.id = `l${this.bindingId++}`;
+        }
+
+        return node;
     }
 
     private async processForElement(element: Parse5Element): Promise<ForNode>

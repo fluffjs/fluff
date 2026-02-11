@@ -9,14 +9,15 @@ import type { IfMarkerConfig } from './interfaces/IfMarkerConfig.js';
 import type { SwitchMarkerConfig } from './interfaces/SwitchMarkerConfig.js';
 import type { TextMarkerConfig } from './interfaces/TextMarkerConfig.js';
 import { Parse5Helpers, type Parse5NS } from './Parse5Helpers.js';
+import type { PluginManager } from './PluginManager.js';
 import type {
     CommentNode,
     ElementNode,
     ForNode,
     IfNode,
     InterpolationNode,
-    PropertyChain,
     ParsedTemplate,
+    PropertyChain,
     SwitchNode,
     TemplateNode,
     TextNode
@@ -74,25 +75,20 @@ const BINDING_TYPE_MAP: Record<string, number> = {
 export type CompactDep = number | number[];
 
 export type CompactBinding = [
-    number,
-    number,
-    CompactDep[] | null,
-    number | null,
-    Record<string, unknown>?
+    number, number, CompactDep[] | null, number | null, Record<string, unknown>?
 ];
 
 export class CodeGenerator
 {
-    private readonly componentSelectors: Set<string>;
-    private readonly directiveSelectors: Set<string>;
-    private readonly componentSelector: string;
     private static readonly globalExprIdsByExpr = new Map<string, number>();
     private static globalExprs: string[] = [];
     private static readonly globalHandlerIdsByExpr = new Map<string, number>();
     private static globalHandlers: string[] = [];
     private static readonly globalStringTable: string[] = [];
     private static readonly globalStringIndices = new Map<string, number>();
-
+    private readonly componentSelectors: Set<string>;
+    private readonly directiveSelectors: Set<string>;
+    private readonly componentSelector: string;
     private markerId = 0;
     private readonly markerConfigs = new Map<number, MarkerConfig>();
     private readonly usedExprIds: number[] = [];
@@ -135,6 +131,90 @@ export class CodeGenerator
     public static getStringTable(): string[]
     {
         return CodeGenerator.globalStringTable;
+    }
+
+    public static internExpression(expr: string): number
+    {
+        const existing = CodeGenerator.globalExprIdsByExpr.get(expr);
+        if (existing !== undefined)
+        {
+            return existing;
+        }
+        const id = CodeGenerator.globalExprs.length;
+        CodeGenerator.globalExprs.push(expr);
+        CodeGenerator.globalExprIdsByExpr.set(expr, id);
+        return id;
+    }
+
+    public static generateGlobalExprTable(pluginManager?: PluginManager): string
+    {
+        const exprElements = CodeGenerator.globalExprs.map(e =>
+        {
+            const normalizedExpr = CodeGenerator.normalizeCompiledExpr(e);
+            return CodeGenerator.buildExpressionArrowFunction(['t', 'l'], normalizedExpr);
+        });
+
+        const handlerElements = CodeGenerator.globalHandlers.map(h =>
+        {
+            const normalizedHandler = CodeGenerator.normalizeCompiledExpr(h);
+            return CodeGenerator.buildHandlerArrowFunction(['t', 'l', '__ev'], normalizedHandler);
+        });
+
+        const stringElements = CodeGenerator.globalStringTable.map(s => t.stringLiteral(s));
+
+        const fluffBaseImport = t.importDeclaration([t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase'))], t.stringLiteral('@fluffjs/fluff'));
+
+        const tableArgs: t.Expression[] = [
+            t.arrayExpression(exprElements), t.arrayExpression(handlerElements), t.arrayExpression(stringElements)
+        ];
+
+        if (pluginManager?.hasPlugins)
+        {
+            const customTables = pluginManager.collectCustomTables();
+            if (customTables.length > 0)
+            {
+                const tablesObject = t.objectExpression(customTables.map(table => t.objectProperty(t.stringLiteral(table.name), t.arrayExpression(table.elements))));
+                tableArgs.push(tablesObject);
+            }
+        }
+
+        const setExprTableCall = t.expressionStatement(t.callExpression(t.memberExpression(t.identifier('FluffBase'), t.identifier('__setExpressionTable')), tableArgs));
+
+        const program = t.program([fluffBaseImport, setExprTableCall]);
+        return generate(program, { compact: false }).code;
+    }
+
+    private static buildExpressionArrowFunction(params: string[], bodyExpr: string): t.ArrowFunctionExpression
+    {
+        const paramNodes = params.map(p => t.identifier(p));
+        const exprAst = parse(`(${bodyExpr})`, { sourceType: 'module' });
+        const [exprStmt] = exprAst.program.body;
+        if (t.isExpressionStatement(exprStmt))
+        {
+            return t.arrowFunctionExpression(paramNodes, exprStmt.expression);
+        }
+        return t.arrowFunctionExpression(paramNodes, t.identifier('undefined'));
+    }
+
+    private static buildHandlerArrowFunction(params: string[], bodyCode: string): t.ArrowFunctionExpression
+    {
+        const paramNodes = params.map(p => t.identifier(p));
+        const bodyStatements = parseMethodBody(bodyCode);
+        return t.arrowFunctionExpression(paramNodes, t.blockStatement(bodyStatements));
+    }
+
+    private static normalizeCompiledExpr(expr: string): string
+    {
+        let result = expr;
+        if (result.includes('this'))
+        {
+            result = ExpressionTransformer.replaceThisExpression(result, 't');
+        }
+        if (result.includes('$event'))
+        {
+            result = ExpressionTransformer.renameVariable(result, '$event', '__ev');
+        }
+        return result;
     }
 
     public generateRenderMethod(template: ParsedTemplate, styles?: string): string
@@ -181,32 +261,11 @@ export class CodeGenerator
 
         const statements: t.Statement[] = [];
 
-        statements.push(
-            t.expressionStatement(
-                t.assignmentExpression(
-                    '=',
-                    t.memberExpression(
-                        t.callExpression(
-                            t.memberExpression(t.thisExpression(), t.identifier('__getShadowRoot')),
-                            []
-                        ),
-                        t.identifier('innerHTML')
-                    ),
-                    t.stringLiteral(content)
-                )
-            )
-        );
+        statements.push(t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier('__getShadowRoot')), []), t.identifier('innerHTML')), t.stringLiteral(content))));
 
         if (markerConfigExpr)
         {
-            statements.push(
-                t.expressionStatement(
-                    t.callExpression(
-                        t.memberExpression(t.thisExpression(), t.identifier('__setMarkerConfigs')),
-                        [markerConfigExpr]
-                    )
-                )
-            );
+            statements.push(t.expressionStatement(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier('__setMarkerConfigs')), [markerConfigExpr])));
         }
 
         const program = t.program(statements);
@@ -218,12 +277,73 @@ export class CodeGenerator
         return this.buildMarkerConfigExpression();
     }
 
+    public generateBindingsSetup(): string
+    {
+        const statements: t.Statement[] = [
+            t.expressionStatement(t.callExpression(t.memberExpression(t.thisExpression(), t.identifier('__initializeMarkers')), [t.identifier('MarkerManager')])),
+            t.expressionStatement(t.callExpression(t.memberExpression(t.super(), t.identifier('__setupBindings')), []))
+        ];
+
+        const program = t.program(statements);
+        return generate(program, { compact: false }).code;
+    }
+
+    public getBindingsMap(): Record<string, CompactBinding[]>
+    {
+        return Object.fromEntries(this.bindingsMap.entries());
+    }
+
+    public getBindingsMapRef(): Map<string, CompactBinding[]>
+    {
+        return this.bindingsMap;
+    }
+
+    public getMarkerConfigsRef(): Map<number, MarkerConfig>
+    {
+        return this.markerConfigs;
+    }
+
+    public getRootFragment(): Parse5DocumentFragment | null
+    {
+        return this.rootFragment;
+    }
+
+    public generateExpressionAssignments(): string
+    {
+        const statements: t.Statement[] = [];
+
+        for (const id of this.usedExprIds)
+        {
+            const expr = CodeGenerator.globalExprs[id];
+            const normalizedExpr = CodeGenerator.normalizeCompiledExpr(expr);
+            const arrowFunc = CodeGenerator.buildExpressionArrowFunction(['t', 'l'], normalizedExpr);
+
+            statements.push(t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.memberExpression(t.identifier('FluffBase'), t.identifier('__e')), t.numericLiteral(id), true), arrowFunc)));
+        }
+
+        for (const id of this.usedHandlerIds)
+        {
+            const handler = CodeGenerator.globalHandlers[id];
+            const normalizedHandler = CodeGenerator.normalizeCompiledExpr(handler);
+            const arrowFunc = CodeGenerator.buildHandlerArrowFunction(['t', 'l', '__ev'], normalizedHandler);
+
+            statements.push(t.expressionStatement(t.assignmentExpression('=', t.memberExpression(t.memberExpression(t.identifier('FluffBase'), t.identifier('__h')), t.numericLiteral(id), true), arrowFunc)));
+        }
+
+        if (statements.length === 0)
+        {
+            return '';
+        }
+
+        const program = t.program(statements);
+        return generate(program, { compact: false }).code;
+    }
+
     private buildMarkerConfigExpression(): t.Expression
     {
         const entries = Array.from(this.markerConfigs.entries())
             .map(([id, config]) => t.arrayExpression([
-                t.numericLiteral(id),
-                this.buildMarkerConfigArray(config)
+                t.numericLiteral(id), this.buildMarkerConfigArray(config)
             ]));
 
         return t.arrayExpression(entries);
@@ -242,12 +362,10 @@ export class CodeGenerator
                 t.numericLiteral(typeNum),
                 t.numericLiteral(config.exprId),
                 config.deps ? this.buildCompactDepsExpression(config.deps) : t.nullLiteral(),
-                config.pipes && config.pipes.length > 0
-                    ? t.arrayExpression(config.pipes.map(pipe => t.arrayExpression([
-                        t.numericLiteral(CodeGenerator.internString(pipe.name)),
-                        t.arrayExpression(pipe.argExprIds.map(arg => t.numericLiteral(arg)))
-                    ])))
-                    : t.nullLiteral()
+                config.pipes && config.pipes.length > 0 ? t.arrayExpression(config.pipes.map(pipe => t.arrayExpression([
+                    t.numericLiteral(CodeGenerator.internString(pipe.name)),
+                    t.arrayExpression(pipe.argExprIds.map(arg => t.numericLiteral(arg)))
+                ]))) : t.nullLiteral()
             ];
             return t.arrayExpression(elements);
         }
@@ -274,22 +392,16 @@ export class CodeGenerator
                 t.numericLiteral(config.iterableExprId),
                 t.booleanLiteral(config.hasEmpty),
                 config.deps ? this.buildCompactDepsExpression(config.deps) : t.nullLiteral(),
-                config.trackBy !== undefined
-                    ? t.numericLiteral(CodeGenerator.internString(config.trackBy))
-                    : t.nullLiteral()
+                config.trackBy !== undefined ? t.numericLiteral(CodeGenerator.internString(config.trackBy)) : t.nullLiteral()
             ]);
         }
         else if (config.type === 'switch')
         {
-            const cases = t.arrayExpression(config.cases.map(caseConfig =>
-                t.arrayExpression([
-                    t.booleanLiteral(caseConfig.isDefault),
-                    t.booleanLiteral(caseConfig.fallthrough),
-                    caseConfig.valueExprId !== undefined
-                        ? t.numericLiteral(caseConfig.valueExprId)
-                        : t.nullLiteral()
-                ])
-            ));
+            const cases = t.arrayExpression(config.cases.map(caseConfig => t.arrayExpression([
+                t.booleanLiteral(caseConfig.isDefault),
+                t.booleanLiteral(caseConfig.fallthrough),
+                caseConfig.valueExprId !== undefined ? t.numericLiteral(caseConfig.valueExprId) : t.nullLiteral()
+            ])));
             return t.arrayExpression([
                 t.numericLiteral(typeNum),
                 t.numericLiteral(config.expressionExprId),
@@ -317,156 +429,6 @@ export class CodeGenerator
             return t.arrayExpression(dep.map(part => t.numericLiteral(CodeGenerator.internString(part))));
         }
         return t.numericLiteral(CodeGenerator.internString(dep));
-    }
-
-    public generateBindingsSetup(): string
-    {
-        const statements: t.Statement[] = [
-            t.expressionStatement(
-                t.callExpression(
-                    t.memberExpression(t.thisExpression(), t.identifier('__initializeMarkers')),
-                    [t.identifier('MarkerManager')]
-                )
-            ),
-            t.expressionStatement(
-                t.callExpression(
-                    t.memberExpression(t.super(), t.identifier('__setupBindings')),
-                    []
-                )
-            )
-        ];
-
-        const program = t.program(statements);
-        return generate(program, { compact: false }).code;
-    }
-
-    public getBindingsMap(): Record<string, CompactBinding[]>
-    {
-        return Object.fromEntries(this.bindingsMap.entries());
-    }
-
-    public generateExpressionAssignments(): string
-    {
-        const statements: t.Statement[] = [];
-
-        for (const id of this.usedExprIds)
-        {
-            const expr = CodeGenerator.globalExprs[id];
-            const normalizedExpr = CodeGenerator.normalizeCompiledExpr(expr);
-            const arrowFunc = CodeGenerator.buildExpressionArrowFunction(['t', 'l'], normalizedExpr);
-
-            statements.push(
-                t.expressionStatement(
-                    t.assignmentExpression(
-                        '=',
-                        t.memberExpression(
-                            t.memberExpression(t.identifier('FluffBase'), t.identifier('__e')),
-                            t.numericLiteral(id),
-                            true
-                        ),
-                        arrowFunc
-                    )
-                )
-            );
-        }
-
-        for (const id of this.usedHandlerIds)
-        {
-            const handler = CodeGenerator.globalHandlers[id];
-            const normalizedHandler = CodeGenerator.normalizeCompiledExpr(handler);
-            const arrowFunc = CodeGenerator.buildHandlerArrowFunction(['t', 'l', '__ev'], normalizedHandler);
-
-            statements.push(
-                t.expressionStatement(
-                    t.assignmentExpression(
-                        '=',
-                        t.memberExpression(
-                            t.memberExpression(t.identifier('FluffBase'), t.identifier('__h')),
-                            t.numericLiteral(id),
-                            true
-                        ),
-                        arrowFunc
-                    )
-                )
-            );
-        }
-
-        if (statements.length === 0)
-        {
-            return '';
-        }
-
-        const program = t.program(statements);
-        return generate(program, { compact: false }).code;
-    }
-
-    public static generateGlobalExprTable(): string
-    {
-        const exprElements = CodeGenerator.globalExprs.map(e =>
-        {
-            const normalizedExpr = CodeGenerator.normalizeCompiledExpr(e);
-            return CodeGenerator.buildExpressionArrowFunction(['t', 'l'], normalizedExpr);
-        });
-
-        const handlerElements = CodeGenerator.globalHandlers.map(h =>
-        {
-            const normalizedHandler = CodeGenerator.normalizeCompiledExpr(h);
-            return CodeGenerator.buildHandlerArrowFunction(['t', 'l', '__ev'], normalizedHandler);
-        });
-
-        const stringElements = CodeGenerator.globalStringTable.map(s => t.stringLiteral(s));
-
-        const fluffBaseImport = t.importDeclaration(
-            [t.importSpecifier(t.identifier('FluffBase'), t.identifier('FluffBase'))],
-            t.stringLiteral('@fluffjs/fluff')
-        );
-
-        const setExprTableCall = t.expressionStatement(
-            t.callExpression(
-                t.memberExpression(t.identifier('FluffBase'), t.identifier('__setExpressionTable')),
-                [
-                    t.arrayExpression(exprElements),
-                    t.arrayExpression(handlerElements),
-                    t.arrayExpression(stringElements)
-                ]
-            )
-        );
-
-        const program = t.program([fluffBaseImport, setExprTableCall]);
-        return generate(program, { compact: false }).code;
-    }
-
-    private static buildExpressionArrowFunction(params: string[], bodyExpr: string): t.ArrowFunctionExpression
-    {
-        const paramNodes = params.map(p => t.identifier(p));
-        const exprAst = parse(`(${bodyExpr})`, { sourceType: 'module' });
-        const [exprStmt] = exprAst.program.body;
-        if (t.isExpressionStatement(exprStmt))
-        {
-            return t.arrowFunctionExpression(paramNodes, exprStmt.expression);
-        }
-        return t.arrowFunctionExpression(paramNodes, t.identifier('undefined'));
-    }
-
-    private static buildHandlerArrowFunction(params: string[], bodyCode: string): t.ArrowFunctionExpression
-    {
-        const paramNodes = params.map(p => t.identifier(p));
-        const bodyStatements = parseMethodBody(bodyCode);
-        return t.arrowFunctionExpression(paramNodes, t.blockStatement(bodyStatements));
-    }
-
-    private static normalizeCompiledExpr(expr: string): string
-    {
-        let result = expr;
-        if (result.includes('this'))
-        {
-            result = ExpressionTransformer.replaceThisExpression(result, 't');
-        }
-        if (result.includes('$event'))
-        {
-            result = ExpressionTransformer.renameVariable(result, '$event', '__ev');
-        }
-        return result;
     }
 
     private nextMarkerId(): number
@@ -593,7 +555,12 @@ export class CodeGenerator
         if (currentNs !== Parse5Helpers.NS_HTML)
         {
             const wrapperTag = currentNs === Parse5Helpers.NS_SVG ? 'svg' : 'math';
-            const wrapper = Parse5Helpers.createElement(wrapperTag, [{ name: 'data-fluff-ns-wrapper', value: '' }], currentNs);
+            const wrapper = Parse5Helpers.createElement(wrapperTag, [
+                {
+                    name: 'data-fluff-ns-wrapper',
+                    value: ''
+                }
+            ], currentNs);
             Parse5Helpers.appendChild(tplContent, wrapper);
             this.renderNodesToParent(nodes, wrapper);
         }
@@ -613,9 +580,7 @@ export class CodeGenerator
 
     private isComponentTag(tagName: string): boolean
     {
-        const resolvedTagName = tagName.startsWith(RESTRICTED_ELEMENT_PREFIX)
-            ? tagName.slice(RESTRICTED_ELEMENT_PREFIX.length)
-            : tagName;
+        const resolvedTagName = tagName.startsWith(RESTRICTED_ELEMENT_PREFIX) ? tagName.slice(RESTRICTED_ELEMENT_PREFIX.length) : tagName;
         return this.componentSelectors.has(resolvedTagName);
     }
 
@@ -655,9 +620,7 @@ export class CodeGenerator
             return [nameIdx, bindType, null, null];
         }
 
-        const deps = binding.deps
-            ? binding.deps.map(dep => this.internDep(dep))
-            : null;
+        const deps = binding.deps ? binding.deps.map(dep => this.internDep(dep)) : null;
 
         let id: number | null = null;
         if (binding.binding === 'event')
@@ -695,8 +658,7 @@ export class CodeGenerator
         if (binding.pipes && binding.pipes.length > 0)
         {
             extras.p = binding.pipes.map(pipe => ([
-                CodeGenerator.internString(pipe.name),
-                pipe.args.map(arg => this.internExpression(arg))
+                CodeGenerator.internString(pipe.name), pipe.args.map(arg => this.internExpression(arg))
             ]));
         }
 
@@ -761,8 +723,7 @@ export class CodeGenerator
             exprId: this.internExpression(node.expression),
             deps: node.deps,
             pipes: node.pipes?.map(pipe => ({
-                name: pipe.name,
-                argExprIds: pipe.args.map(arg => this.internExpression(arg))
+                name: pipe.name, argExprIds: pipe.args.map(arg => this.internExpression(arg))
             }))
         };
         this.markerConfigs.set(id, config);
@@ -780,10 +741,8 @@ export class CodeGenerator
     {
         const id = this.nextMarkerId();
         const config: IfMarkerConfig = {
-            type: 'if',
-            branches: node.branches.map(b => ({
-                exprId: b.condition ? this.internExpression(b.condition) : undefined,
-                deps: b.conditionDeps
+            type: 'if', branches: node.branches.map(b => ({
+                exprId: b.condition ? this.internExpression(b.condition) : undefined, deps: b.conditionDeps
             }))
         };
         this.markerConfigs.set(id, config);

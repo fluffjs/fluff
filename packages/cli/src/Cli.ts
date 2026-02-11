@@ -1,6 +1,6 @@
 import * as t from '@babel/types';
 import { execSync } from 'child_process';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -13,6 +13,8 @@ import { fluffPlugin } from './fluff-esbuild-plugin.js';
 import { Generator } from './Generator.js';
 import { IndexHtmlTransformer } from './IndexHtmlTransformer.js';
 import type { CliOptions } from './interfaces/CliOptions.js';
+import { PluginLoader } from './PluginLoader.js';
+import type { PluginManager } from './PluginManager.js';
 import type { FluffConfig, FluffTarget } from './types/FluffConfig.js';
 import { DEFAULT_CONFIG } from './types/FluffConfig.js';
 
@@ -21,12 +23,31 @@ interface EntryPointConfig
     useStdin: boolean;
     entryPointFile: string | null;
     generatedEntry: { contents: string; resolveDir: string } | null;
+    tempEntryFile: string | null;
 }
 
 interface EsbuildEntryConfig
 {
     stdin?: { contents: string; resolveDir: string; loader: 'ts' };
     entryPoints?: string[];
+}
+
+interface BaseEsbuildParams
+{
+    entry: EntryPointConfig;
+    appDir: string;
+    outDir: string;
+    splitting: boolean;
+    minify: boolean;
+    tsconfigRaw: string;
+    pluginManager: PluginManager;
+    production: boolean;
+    sourcemap?: boolean;
+    target?: string;
+    metafile?: boolean;
+    external?: string[];
+    extraPlugins?: esbuild.Plugin[];
+    globalStylesCss?: string;
 }
 
 export class Cli
@@ -46,14 +67,58 @@ export class Cli
         this.gzScriptTag = options.gzScriptTag ?? false;
     }
 
-    private resolveCwd(): string
+    public static parseArgs(argv: string[]): { options: CliOptions; args: string[] }
     {
-        const processCwd = process.cwd();
-        if (fs.existsSync(path.join(processCwd, 'fluff.json')))
+        const options: CliOptions = {};
+        const args: string[] = [];
+
+        let i = 0;
+        while (i < argv.length)
         {
-            return processCwd;
+            const arg = argv[i];
+
+            if (arg === '--nx' && argv[i + 1])
+            {
+                options.nxPackage = argv[i + 1];
+                i += 2;
+            }
+            else if (arg === '--cwd' && argv[i + 1])
+            {
+                options.cwd = argv[i + 1];
+                i += 2;
+            }
+            else if (arg === '--no-gzip')
+            {
+                options.noGzip = true;
+                i++;
+            }
+            else if (arg === '--no-minify')
+            {
+                options.noMinify = true;
+                i++;
+            }
+            else if (arg === '--gz-script-tag')
+            {
+                options.gzScriptTag = true;
+                i++;
+            }
+            else if (arg?.startsWith('--'))
+            {
+                console.error(`Unknown option: ${arg}`);
+                process.exit(1);
+            }
+            else if (arg)
+            {
+                args.push(arg);
+                i++;
+            }
+            else
+            {
+                i++;
+            }
         }
-        return process.env.INIT_CWD ?? processCwd;
+
+        return { options, args };
     }
 
     public async run(args: string[]): Promise<void>
@@ -86,6 +151,16 @@ export class Cli
                 this.showHelp();
                 process.exit(1);
         }
+    }
+
+    private resolveCwd(): string
+    {
+        const processCwd = process.cwd();
+        if (fs.existsSync(path.join(processCwd, 'fluff.json')))
+        {
+            return processCwd;
+        }
+        return process.env.INIT_CWD ?? processCwd;
     }
 
     private showHelp(): void
@@ -343,10 +418,7 @@ Examples:
             {
                 config.targets = {
                     [targetName]: {
-                        name: targetName,
-                        srcDir: 'src',
-                        outDir: 'dist',
-                        assets: ['**/*.html', '**/*.css']
+                        name: targetName, srcDir: 'src', outDir: 'dist', assets: ['**/*.html', '**/*.css']
                     }
                 };
                 config.defaultTarget = targetName;
@@ -390,9 +462,7 @@ Examples:
 
         const generator = new Generator();
         generator.generate({
-            appName,
-            outputDir: this.cwd,
-            packageManager
+            appName, outputDir: this.cwd, packageManager
         });
     }
 
@@ -423,6 +493,7 @@ Examples:
         }
 
         const config = this.loadConfigFrom(configPath);
+        const pluginManager = await this.loadPlugins(config, projectRoot);
 
         let targets: FluffTarget[] = [];
 
@@ -455,25 +526,18 @@ Examples:
 
         for (const target of targets)
         {
-            await this.buildTarget(target, projectRoot, workspaceRoot, projectRelativePath);
+            await this.buildTarget(target, projectRoot, workspaceRoot, projectRelativePath, pluginManager);
         }
     }
 
-    private async buildTarget(
-        target: FluffTarget,
-        projectRoot: string,
-        workspaceRoot: string | null,
-        projectRelativePath: string | null
-    ): Promise<void>
+    private async buildTarget(target: FluffTarget, projectRoot: string, workspaceRoot: string | null, projectRelativePath: string | null, pluginManager: PluginManager): Promise<void>
     {
         console.log(`🔨 Building target '${target.name}'...`);
 
         const srcDir = path.resolve(projectRoot, target.srcDir);
         const appDir = path.join(srcDir, target.componentsDir ?? 'app');
 
-        const outDir = (workspaceRoot && projectRelativePath)
-            ? path.join(workspaceRoot, 'dist', projectRelativePath)
-            : path.resolve(projectRoot, target.outDir);
+        const outDir = (workspaceRoot && projectRelativePath) ? path.join(workspaceRoot, 'dist', projectRelativePath) : path.resolve(projectRoot, target.outDir);
 
         if (!fs.existsSync(srcDir))
         {
@@ -494,8 +558,10 @@ Examples:
         {
             bundleOptions.minify = false;
         }
-        const entry = this.resolveEntryPoint(target, srcDir);
+        const splitting = bundleOptions.splitting ?? false;
+        const entry = this.resolveEntryPoint(target, srcDir, splitting);
         const inlineStyles = await this.collectStyles(target, srcDir, bundleOptions.minify ?? true);
+        const globalStylesCss = await this.collectGlobalStyles(target, srcDir, bundleOptions.minify ?? true);
 
         this.runTypeCheck(target, projectRoot);
 
@@ -503,40 +569,28 @@ Examples:
 
         const tsconfigRaw = this.loadTsConfig(target, projectRoot);
 
-        const result = await esbuild.build({
-            ...this.getEsbuildEntryConfig(entry),
-            bundle: true,
-            ...(entry.useStdin
-                ? { outfile: path.join(outDir, 'fluff-app.js') }
-                : { outdir: outDir, entryNames: '[name]' }),
-            format: 'esm',
-            platform: 'browser',
-            target: bundleOptions.target ?? 'es2022',
+        const result = await esbuild.build(this.buildBaseEsbuildConfig({
+            entry, appDir, outDir, splitting,
             minify: bundleOptions.minify ?? true,
-            splitting: bundleOptions.splitting ?? false,
-            treeShaking: true,
+            tsconfigRaw, pluginManager,
+            production: true,
+            target: bundleOptions.target ?? 'es2022',
             metafile: true,
-            plugins: [
-                fluffPlugin({
-                    srcDir: appDir,
-                    outDir,
-                    minify: bundleOptions.minify ?? true,
-                    skipDefine: false,
-                    production: true
-                })
-            ],
             external: bundleOptions.external ?? [],
-            logLevel: 'warning',
-            tsconfigRaw
-        });
+            globalStylesCss
+        }))
+            .finally(() =>
+            {
+                this.cleanupTempEntry(entry);
+            });
 
-        const outputs = Object.keys(result.metafile?.outputs ?? {});
-        const jsBundle = outputs.find(f => f.endsWith('.js'));
-        const cssBundle = outputs.find(f => f.endsWith('.css'));
+        const outputKeys = Object.keys(result.metafile?.outputs ?? {});
+        const jsBundleName = this.getJsBundleName(entry);
+        const jsBundle = outputKeys.find(f => path.basename(f) === jsBundleName);
+        const cssBundle = outputKeys.find(f => f.endsWith('.css'));
 
         if (jsBundle)
         {
-            const jsBundleName = path.basename(jsBundle);
             const jsPath = path.join(outDir, jsBundleName);
 
             if (bundleOptions.gzip)
@@ -584,7 +638,8 @@ Examples:
                     inlineStyles: inlineStyles || undefined,
                     gzip: bundleOptions.gzip,
                     gzScriptTag: bundleOptions.gzScriptTag ?? this.gzScriptTag,
-                    minify: bundleOptions.minify
+                    minify: bundleOptions.minify,
+                    pluginManager
                 });
                 fs.writeFileSync(path.join(outDir, 'index.html'), transformed);
                 console.log('   ✓ Transformed index.html');
@@ -626,6 +681,7 @@ Examples:
         }
 
         const config = this.loadConfigFrom(configPath);
+        const pluginManager = await this.loadPlugins(config, projectRoot);
 
         let target: FluffTarget | undefined = undefined;
 
@@ -657,15 +713,10 @@ Examples:
             }
         }
 
-        await this.serveTarget(target, projectRoot, workspaceRoot, projectRelativePath);
+        await this.serveTarget(target, projectRoot, workspaceRoot, projectRelativePath, pluginManager);
     }
 
-    private async serveTarget(
-        target: FluffTarget,
-        projectRoot: string,
-        workspaceRoot: string | null,
-        projectRelativePath: string | null
-    ): Promise<void>
+    private async serveTarget(target: FluffTarget, projectRoot: string, workspaceRoot: string | null, projectRelativePath: string | null, pluginManager: PluginManager): Promise<void>
     {
         const srcDir = path.resolve(projectRoot, target.srcDir);
         const appDir = path.join(srcDir, target.componentsDir ?? 'app');
@@ -679,10 +730,21 @@ Examples:
             fs.mkdirSync(outDir, { recursive: true });
         }
 
+        let entry: EntryPointConfig | null = null;
+        let ctx: esbuild.BuildContext | null = null;
         const cleanup = (): void =>
         {
             try
             {
+                if (ctx)
+                {
+                    ctx.dispose().catch((e: unknown) =>
+                    {
+                        console.error('Failed to dispose esbuild context:', e);
+                    });
+                    ctx = null;
+                }
+                this.cleanupTempEntry(entry);
                 if (fs.existsSync(outDir))
                 {
                     fs.rmSync(outDir, { recursive: true, force: true });
@@ -708,7 +770,6 @@ Examples:
         const serveOptions = target.serve ?? {};
         const port = serveOptions.port ?? 3000;
         const host = serveOptions.host ?? 'localhost';
-        const esbuildPort = port + 1;
 
         let proxyConfig = undefined;
         if (serveOptions.proxyConfig)
@@ -725,8 +786,11 @@ Examples:
             }
         }
 
-        const entry = this.resolveEntryPoint(target, srcDir);
+        const bundleOptions = { ...target.bundle };
+        const splitting = bundleOptions.splitting ?? false;
+        entry = this.resolveEntryPoint(target, srcDir, splitting);
         const inlineStyles = await this.collectStyles(target, srcDir, false);
+        const globalStylesCss = await this.collectGlobalStyles(target, srcDir, false);
 
         if (target.indexHtml)
         {
@@ -740,7 +804,8 @@ Examples:
                     inlineStyles: inlineStyles || undefined,
                     gzip: false,
                     minify: false,
-                    liveReload: true
+                    liveReload: true,
+                    pluginManager
                 });
                 fs.writeFileSync(path.join(outDir, 'index.html'), transformed);
             }
@@ -755,74 +820,120 @@ Examples:
 
         const tsconfigRaw = this.loadTsConfig(target, projectRoot);
 
-        const ctx = await esbuild.context({
-            ...this.getEsbuildEntryConfig(entry),
-            bundle: true,
-            ...(entry.useStdin
-                ? { outfile: path.join(outDir, 'fluff-app.js') }
-                : { outdir: outDir, entryNames: '[name]' }),
-            format: 'esm',
-            platform: 'browser',
-            target: 'es2022',
-            minify: false,
-            treeShaking: true,
-            sourcemap: true,
-            plugins: [
-                fluffPlugin({
-                    srcDir: appDir,
-                    outDir,
-                    minify: false,
-                    sourcemap: true,
-                    skipDefine: false,
-                    production: false
-                })
-            ],
-            logLevel: 'info',
-            tsconfigRaw
+        const devServer = new DevServer({
+            port, host, outDir, proxyConfig
         });
+
+        ctx = await esbuild.context(this.buildBaseEsbuildConfig({
+            entry, appDir, outDir, splitting,
+            minify: false,
+            tsconfigRaw, pluginManager,
+            production: false,
+            sourcemap: true,
+            globalStylesCss,
+            extraPlugins: [{
+                name: 'fluff-live-reload', setup(build): void
+                {
+                    build.onEnd((result) =>
+                    {
+                        if (result.errors.length === 0)
+                        {
+                            console.log('[watch] build finished, watching for changes...');
+                            devServer.notifyReload();
+                        }
+                    });
+                }
+            }]
+        }));
 
         await ctx.watch();
         console.log('   Watching for changes...');
 
-        if (proxyConfig)
+        await devServer.start();
+        console.log(`   Server running at http://${host}:${port}`);
+        console.log('   Press Ctrl+C to stop\n');
+    }
+
+    private resolveEntryPoint(target: FluffTarget, srcDir: string, splitting: boolean): EntryPointConfig
+    {
+        if (!target.entryPoint)
         {
-            await ctx.serve({
-                servedir: outDir,
-                port: esbuildPort,
-                host: '127.0.0.1'
-            });
+            const generated = this.generateEntryContent(srcDir, target.exclude);
 
-            const devServer = new DevServer({
-                port,
-                host,
-                esbuildPort,
-                esbuildHost: '127.0.0.1',
-                proxyConfig
-            });
+            if (splitting)
+            {
+                let tempPath = path.join(srcDir, 'fluff-app.ts');
+                if (fs.existsSync(tempPath))
+                {
+                    const hex = randomBytes(4).toString('hex');
+                    tempPath = path.join(srcDir, `fluff-app-${hex}.ts`);
+                }
+                fs.writeFileSync(tempPath, generated.contents);
+                return { useStdin: false, entryPointFile: tempPath, generatedEntry: null, tempEntryFile: tempPath };
+            }
 
-            await devServer.start();
-            console.log(`   Server running at http://${host}:${port}`);
-            console.log('   Press Ctrl+C to stop\n');
+            return { useStdin: true, entryPointFile: null, generatedEntry: generated, tempEntryFile: null };
         }
-        else
-        {
-            const { hosts, port: actualPort } = await ctx.serve({
-                servedir: outDir,
-                port,
-                host
-            });
 
-            console.log(`   Server running at http://${hosts[0]}:${actualPort}`);
-            console.log('   Press Ctrl+C to stop\n');
+        return {
+            useStdin: false,
+            entryPointFile: path.join(srcDir, target.entryPoint),
+            generatedEntry: null,
+            tempEntryFile: null
+        };
+    }
+
+    private async loadPlugins(config: FluffConfig, projectRoot: string): Promise<PluginManager>
+    {
+        const pluginManager = await PluginLoader.load(config, projectRoot);
+        if (pluginManager.hasPlugins)
+        {
+            await pluginManager.runAfterConfig(config, config.pluginConfig ?? {});
+        }
+        return pluginManager;
+    }
+
+    private cleanupTempEntry(entry: EntryPointConfig | null): void
+    {
+        if (entry?.tempEntryFile && fs.existsSync(entry.tempEntryFile))
+        {
+            fs.unlinkSync(entry.tempEntryFile);
         }
     }
 
-    private resolveEntryPoint(target: FluffTarget, srcDir: string): EntryPointConfig
+    private buildBaseEsbuildConfig(params: BaseEsbuildParams): esbuild.BuildOptions
     {
-        const useStdin = !target.entryPoint;
-        const entryPointFile = target.entryPoint ? path.join(srcDir, target.entryPoint) : null;
-        const generatedEntry = useStdin ? this.generateEntryContent(srcDir, target.exclude) : null;
-        return { useStdin, entryPointFile, generatedEntry };
+        return {
+            ...this.getEsbuildEntryConfig(params.entry),
+            bundle: true,
+            ...(params.entry.useStdin
+                ? { outfile: path.join(params.outDir, 'fluff-app.js') }
+                : { outdir: params.outDir, entryNames: '[name]' }),
+            format: 'esm',
+            platform: 'browser',
+            target: params.target ?? 'es2022',
+            minify: params.minify,
+            splitting: params.splitting,
+            treeShaking: true,
+            metafile: params.metafile ?? false,
+            sourcemap: params.sourcemap ?? false,
+            plugins: [
+                fluffPlugin({
+                    srcDir: params.appDir,
+                    outDir: params.outDir,
+                    minify: params.minify,
+                    sourcemap: params.sourcemap,
+                    skipDefine: false,
+                    production: params.production,
+                    pluginManager: params.pluginManager,
+                    globalStylesCss: params.globalStylesCss
+                }),
+                ...(params.extraPlugins ?? [])
+            ],
+            external: params.external ?? [],
+            logLevel: 'warning',
+            tsconfigRaw: params.tsconfigRaw
+        };
     }
 
     private getEsbuildEntryConfig(entry: EntryPointConfig): EsbuildEntryConfig
@@ -831,9 +942,7 @@ Examples:
         {
             return {
                 stdin: {
-                    contents: entry.generatedEntry.contents,
-                    resolveDir: entry.generatedEntry.resolveDir,
-                    loader: 'ts'
+                    contents: entry.generatedEntry.contents, resolveDir: entry.generatedEntry.resolveDir, loader: 'ts'
                 }
             };
         }
@@ -846,7 +955,8 @@ Examples:
         {
             return 'fluff-app.js';
         }
-        return path.basename(entry.entryPointFile ?? '').replace('.ts', '.js');
+        return path.basename(entry.entryPointFile ?? '')
+            .replace(/\.ts$/, '.js');
     }
 
     private async collectStyles(target: FluffTarget, srcDir: string, minify: boolean): Promise<string>
@@ -860,7 +970,8 @@ Examples:
         for (const stylePath of target.styles)
         {
             const fullPath = path.resolve(srcDir, stylePath);
-            if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile())
+            if (fs.existsSync(fullPath) && fs.statSync(fullPath)
+                .isFile())
             {
                 console.log(`   ✓ Style: ${stylePath}`);
                 styleContents.push(fs.readFileSync(fullPath, 'utf-8'));
@@ -889,8 +1000,7 @@ Examples:
         if (minify)
         {
             const cssResult = await esbuild.transform(inlineStyles, {
-                loader: 'css',
-                minify: true
+                loader: 'css', minify: true
             });
             inlineStyles = cssResult.code;
         }
@@ -898,11 +1008,58 @@ Examples:
         return inlineStyles;
     }
 
+    private async collectGlobalStyles(target: FluffTarget, srcDir: string, minify: boolean): Promise<string>
+    {
+        if (!target.globalStyles || target.globalStyles.length === 0)
+        {
+            return '';
+        }
+
+        const styleContents: string[] = [];
+        for (const stylePath of target.globalStyles)
+        {
+            const fullPath = path.resolve(srcDir, stylePath);
+            if (fs.existsSync(fullPath) && fs.statSync(fullPath)
+                .isFile())
+            {
+                console.log(`   ✓ Global style: ${stylePath}`);
+                styleContents.push(fs.readFileSync(fullPath, 'utf-8'));
+            }
+            else
+            {
+                const styleFiles = this.findFiles(srcDir, [stylePath]);
+                if (styleFiles.length === 0)
+                {
+                    console.warn(`   ⚠ Global style not found: ${fullPath}`);
+                }
+                for (const styleFile of styleFiles)
+                {
+                    console.log(`   ✓ Global style: ${path.relative(srcDir, styleFile)}`);
+                    styleContents.push(fs.readFileSync(styleFile, 'utf-8'));
+                }
+            }
+        }
+
+        if (styleContents.length === 0)
+        {
+            return '';
+        }
+
+        let css = styleContents.join('\n');
+        if (minify)
+        {
+            const cssResult = await esbuild.transform(css, {
+                loader: 'css', minify: true
+            });
+            css = cssResult.code;
+        }
+        console.log('   ✓ Bundled global component styles');
+        return css;
+    }
+
     private loadTsConfig(target: FluffTarget, projectRoot: string): string
     {
-        return target.tsConfigPath
-            ? fs.readFileSync(path.resolve(projectRoot, target.tsConfigPath), 'utf-8')
-            : '{}';
+        return target.tsConfigPath ? fs.readFileSync(path.resolve(projectRoot, target.tsConfigPath), 'utf-8') : '{}';
     }
 
     private runTypeCheck(target: FluffTarget, projectRoot: string): void
@@ -923,8 +1080,7 @@ Examples:
         try
         {
             execSync(`npx -p typescript tsc --noEmit -p ${target.tsConfigPath}`, {
-                cwd: projectRoot,
-                stdio: 'inherit'
+                cwd: projectRoot, stdio: 'inherit'
             });
             console.log('   ✓ Type check passed');
         }
@@ -959,7 +1115,7 @@ Examples:
     private findAllTsFiles(dir: string, userExclude: string[] = []): string[]
     {
         const files: string[] = [];
-        const excludePatterns = ['*.spec.ts', '*.test.ts', '__generated_entry.ts', ...userExclude];
+        const excludePatterns = ['*.spec.ts', '*.test.ts', 'fluff-app*.ts', ...userExclude];
 
         const walk = (currentDir: string): void =>
         {
@@ -975,9 +1131,7 @@ Examples:
                 {
                     const relativePath = path.relative(dir, fullPath)
                         .replace(/\\/g, '/');
-                    const isExcluded = excludePatterns.some(pattern =>
-                        this.matchGlob(entry.name, pattern) || this.matchGlob(relativePath, pattern)
-                    );
+                    const isExcluded = excludePatterns.some(pattern => this.matchGlob(entry.name, pattern) || this.matchGlob(relativePath, pattern));
                     if (!isExcluded)
                     {
                         files.push(fullPath);
@@ -1049,13 +1203,7 @@ Examples:
         return isMatch(normalizedPath);
     }
 
-    private async copyAssets(
-        assets: string[],
-        projectRoot: string,
-        srcDir: string,
-        outDir: string,
-        indexHtml?: string
-    ): Promise<void>
+    private async copyAssets(assets: string[], projectRoot: string, srcDir: string, outDir: string, indexHtml?: string): Promise<void>
     {
         const compiler = new ComponentCompiler();
 
@@ -1107,13 +1255,7 @@ Examples:
         }
     }
 
-    private copyAssetsForServe(
-        assets: string[],
-        projectRoot: string,
-        srcDir: string,
-        outDir: string,
-        indexHtml?: string
-    ): void
+    private copyAssetsForServe(assets: string[], projectRoot: string, srcDir: string, outDir: string, indexHtml?: string): void
     {
         for (const asset of assets)
         {
@@ -1152,11 +1294,7 @@ Examples:
         }
     }
 
-    private async copyDirectoryRecursive(
-        srcPath: string,
-        destPath: string,
-        compiler: ComponentCompiler
-    ): Promise<void>
+    private async copyDirectoryRecursive(srcPath: string, destPath: string, compiler: ComponentCompiler): Promise<void>
     {
         if (!fs.existsSync(destPath))
         {
@@ -1214,59 +1352,5 @@ Examples:
                 }
             }
         }
-    }
-
-    public static parseArgs(argv: string[]): { options: CliOptions; args: string[] }
-    {
-        const options: CliOptions = {};
-        const args: string[] = [];
-
-        let i = 0;
-        while (i < argv.length)
-        {
-            const arg = argv[i];
-
-            if (arg === '--nx' && argv[i + 1])
-            {
-                options.nxPackage = argv[i + 1];
-                i += 2;
-            }
-            else if (arg === '--cwd' && argv[i + 1])
-            {
-                options.cwd = argv[i + 1];
-                i += 2;
-            }
-            else if (arg === '--no-gzip')
-            {
-                options.noGzip = true;
-                i++;
-            }
-            else if (arg === '--no-minify')
-            {
-                options.noMinify = true;
-                i++;
-            }
-            else if (arg === '--gz-script-tag')
-            {
-                options.gzScriptTag = true;
-                i++;
-            }
-            else if (arg?.startsWith('--'))
-            {
-                console.error(`Unknown option: ${arg}`);
-                process.exit(1);
-            }
-            else if (arg)
-            {
-                args.push(arg);
-                i++;
-            }
-            else
-            {
-                i++;
-            }
-        }
-
-        return { options, args };
     }
 }

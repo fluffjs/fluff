@@ -1,0 +1,22 @@
+:host {
+    display: block;
+}
+
+.child-page {
+    padding: 1rem 1.5rem;
+    background: #e8e0f0;
+    border-radius: 8px;
+    text-align: left;
+}
+
+h3 {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+}
+
+.project-id,
+.task-id,
+.subtask-id {
+    margin: 0.3rem 0;
+    color: #444;
+}

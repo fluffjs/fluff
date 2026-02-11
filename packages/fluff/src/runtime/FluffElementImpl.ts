@@ -10,6 +10,13 @@ import { getScope, unregisterScope, type Scope } from './ScopeRegistry.js';
 
 export abstract class FluffElement extends FluffBase
 {
+    private static readonly __globalStyleSheets: CSSStyleSheet[] = [];
+
+    public static __addGlobalStyleSheet(sheet: CSSStyleSheet): void
+    {
+        FluffElement.__globalStyleSheets.push(sheet);
+    }
+
     protected __pipes: Record<string, (value: unknown, ...args: unknown[]) => unknown> = {};
     protected readonly _shadowRoot: ShadowRoot;
     private _subscriptions: Subscription[] = [];
@@ -24,6 +31,10 @@ export abstract class FluffElement extends FluffBase
     {
         super();
         this._shadowRoot = this.attachShadow({ mode: 'open' });
+        if (FluffElement.__globalStyleSheets.length > 0)
+        {
+            this._shadowRoot.adoptedStyleSheets = [...FluffElement.__globalStyleSheets];
+        }
     }
 
     public connectedCallback(): void

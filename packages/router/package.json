@@ -1,0 +1,84 @@
+{
+    "name": "@fluffjs/router",
+    "version": "0.0.1",
+    "private": true,
+    "type": "module",
+    "main": "./dist/index.js",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        "./package.json": "./package.json",
+        ".": {
+            "@fluffjs/source": "./src/index.ts",
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js",
+            "default": "./dist/index.js"
+        },
+        "./runtime": {
+            "@fluffjs/source": "./src/runtime/index.ts",
+            "types": "./dist/runtime/index.d.ts",
+            "import": "./dist/runtime/index.js",
+            "default": "./dist/runtime/index.js"
+        }
+    },
+    "files": [
+        "dist",
+        "!**/*.tsbuildinfo"
+    ],
+    "peerDependencies": {
+        "@babel/types": "^7.28.0",
+        "@fluffjs/cli": "*",
+        "@fluffjs/fluff": "*",
+        "parse5": "^8.0.0"
+    },
+    "nx": {
+        "targets": {
+            "lint": {
+                "executor": "@nx/eslint:lint",
+                "options": {
+                    "fix": true
+                }
+            },
+            "build-internal": {
+                "executor": "nx:run-commands",
+                "outputs": [
+                    "{projectRoot}/dist"
+                ],
+                "options": {
+                    "commands": [
+                        "tsc --noEmit -p tsconfig.spec.json",
+                        "tsc --build tsconfig.lib.json",
+                        "node scripts/copy-package-json.mjs"
+                    ],
+                    "cwd": "{projectRoot}",
+                    "parallel": false
+                }
+            },
+            "build": {
+                "executor": "nx:run-commands",
+                "dependsOn": [
+                    "lint",
+                    "test",
+                    "build-internal",
+                    "router-e2e:e2e",
+                    "router-subpath-e2e:e2e"
+                ],
+                "outputs": [
+                    "{projectRoot}/dist"
+                ],
+                "options": {
+                    "command": "echo 'Build complete'"
+                }
+            },
+            "test": {
+                "executor": "@nx/vitest:test",
+                "outputs": [
+                    "{options.reportsDirectory}"
+                ],
+                "options": {
+                    "reportsDirectory": "../../coverage/packages/router"
+                }
+            }
+        }
+    }
+}

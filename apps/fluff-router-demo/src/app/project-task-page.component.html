@@ -1,0 +1,12 @@
+<div class="child-page">
+    <h2>📝 Task Detail</h2>
+    <p class="project-id">Project: {{ projectId }}</p>
+    <p class="task-id">Task: {{ taskId }}</p>
+    <nav>
+        <a href="/projects/{{ projectId }}/tasks/{{ taskId }}/subtasks/1">Subtask 1</a>
+        <a href="/projects/{{ projectId }}/tasks/{{ taskId }}/subtasks/2">Subtask 2</a>
+    </nav>
+    <div class="subtask-outlet">
+        <router-outlet></router-outlet>
+    </div>
+</div>

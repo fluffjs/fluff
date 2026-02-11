@@ -1,0 +1,43 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ES2022",
+        "moduleResolution": "bundler",
+        "emitDecoratorMetadata": true,
+        "experimentalDecorators": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "outDir": "./dist",
+        "rootDir": "./src",
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "baseUrl": ".",
+        "paths": {
+            "@fluffjs/fluff": [
+                "../../packages/fluff/dist/index.js"
+            ],
+            "@fluffjs/router": [
+                "../../packages/router/dist/index.js"
+            ]
+        }
+    },
+    "include": [
+        "src/**/*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ],
+    "references": [
+        {
+            "path": "../../packages/fluff/tsconfig.lib.json"
+        },
+        {
+            "path": "../../packages/router/tsconfig.lib.json"
+        }
+    ]
+}

@@ -41,7 +41,8 @@
         "picomatch": "^4.0.2",
         "postcss": "^8.5.6",
         "source-map": "^0.7.6",
-        "tslib": "^2.3.0"
+        "tslib": "^2.3.0",
+        "ws": "^8.19.0"
     },
     "nx": {
         "targets": {
@@ -80,6 +81,7 @@
     "devDependencies": {
         "@types/he": "^1.2.3",
         "@types/http-proxy": "^1.17.16",
-        "@types/jsesc": "^3.0.3"
+        "@types/jsesc": "^3.0.3",
+        "@types/ws": "^8.18.1"
     }
 }

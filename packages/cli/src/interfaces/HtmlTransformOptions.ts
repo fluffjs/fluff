@@ -1,3 +1,5 @@
+import type { PluginManager } from '../PluginManager.js';
+
 export interface HtmlTransformOptions
 {
     jsBundle: string;
@@ -7,4 +9,5 @@ export interface HtmlTransformOptions
     gzScriptTag?: boolean;
     minify?: boolean;
     liveReload?: boolean;
+    pluginManager?: PluginManager;
 }

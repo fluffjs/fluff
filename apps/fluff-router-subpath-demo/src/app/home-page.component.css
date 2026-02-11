@@ -1,0 +1,28 @@
+:host {
+    display: block;
+}
+
+.page {
+    padding: 2rem;
+    text-align: center;
+}
+
+h1 {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+}
+
+nav {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+nav a {
+    padding: 0.5rem 1rem;
+    background: #e67e22;
+    color: white;
+    text-decoration: none;
+    border-radius: 6px;
+}

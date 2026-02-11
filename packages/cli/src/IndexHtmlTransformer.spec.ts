@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IndexHtmlTransformer } from './IndexHtmlTransformer.js';
+import { PluginManager } from './PluginManager.js';
+import type { FluffPlugin } from './interfaces/FluffPlugin.js';
 
 describe('IndexHtmlTransformer', () =>
 {
@@ -65,5 +67,38 @@ describe('IndexHtmlTransformer', () =>
         expect(result)
             .not
             .toContain('<script>(function() {');
+    });
+});
+
+describe('IndexHtmlTransformer plugin hook guards', () =>
+{
+    it('should not call modifyIndexHtml when hook not bound', async() =>
+    {
+        const html = '<!DOCTYPE html><html><head></head><body><div>Test</div></body></html>';
+
+        const plugin: FluffPlugin = {
+            name: 'unrelated-plugin',
+            afterConfig: () => 
+{}
+        };
+        const manager = new PluginManager();
+        manager.registerPlugin(plugin);
+        manager.resolveExecutionOrder();
+
+        const spy = vi.spyOn(manager, 'runModifyIndexHtml');
+
+        await IndexHtmlTransformer.transform(html, {
+            jsBundle: 'main.js',
+            cssBundle: undefined,
+            inlineStyles: undefined,
+            gzip: false,
+            minify: false,
+            pluginManager: manager
+        });
+
+        expect(spy, 'modifyIndexHtml should not be called when no plugin binds to it')
+            .not.toHaveBeenCalled();
+
+        spy.mockRestore();
     });
 });
